@@ -1964,9 +1964,10 @@ function v3Init() {
   add(new T.SphereGeometry(0.165, HQ ? 40 : 18, HQ ? 28 : 12), purple, 0, 1.585, 0, av);   // head, with a gap above the shoulders
   // Limbs hang from pivots (shoulders, hips) so the walk, scrub and sweep animations can swing them.
   const limb = (x, y, r, len, mat) => { const g = new T.Group(); g.position.set(x, y, 0); av.add(g); add(capsule(r, len), mat, 0, -len / 2 + r, 0, g); return g; };
-  const armL = limb(-0.30, 1.33, 0.072, 0.78, purple), armR = limb(0.30, 1.33, 0.072, 0.78, purple);
-  for (const arm of [armL, armR]) add(capsule(0.077, 0.18), handMat, 0, -0.62, 0, arm);   // glove over the hand
-  const legL = limb(-0.112, HIPY + 0.09, 0.09, HIPY + 0.18, deep), legR = limb(0.112, HIPY + 0.09, 0.09, HIPY + 0.18, deep);   // feet on the floor
+  // Shoulder joints sit inside the torso's rounded shoulders, so the arms grow out of the body.
+  const armL = limb(-0.215, 1.29, 0.075, 0.74, purple), armR = limb(0.215, 1.29, 0.075, 0.74, purple);
+  for (const arm of [armL, armR]) add(capsule(0.08, 0.18), handMat, 0, -0.575, 0, arm);   // glove over the hand
+  const legL = limb(-0.112, HIPY + 0.09, 0.09, HIPY + 0.18, purple), legR = limb(0.112, HIPY + 0.09, 0.09, HIPY + 0.18, purple);   // one purple all over   // feet on the floor
   // Broom / mop held in front while sweeping and mopping.
   // Broom / mop: held in the right hand. Each frame it's placed with the handle through the right
   // glove and the head on the floor in front (see v3Draw).
@@ -2128,8 +2129,8 @@ function v3Draw(t) {
   V3.tool.visible = floorWork;
   if (floorWork) {
     // Right hand position in the avatar's space (shoulder pivot, arm swung by rotation.x).
-    const a = V3.armR.rotation.x, L = 0.62;
-    const hx = 0.30, hy = 1.33 - L * Math.cos(a), hz = -L * Math.sin(a);
+    const a = V3.armR.rotation.x, L = 0.58, sp = V3.armR.position;
+    const hx = sp.x, hy = sp.y - L * Math.cos(a), hz = -L * Math.sin(a);
     // Broom head on the floor ahead, swishing side to side.
     const fx = 0.18 + Math.sin(t * 6) * 0.14, fy = 0.03, fz = hz + 0.5;
     const dx = fx - hx, dy = fy - hy, dz = fz - hz, dist = Math.hypot(dx, dy, dz);
