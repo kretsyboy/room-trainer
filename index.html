@@ -1680,6 +1680,15 @@ document.getElementById("v3Labels").innerHTML = ZONES.map(z => `<div class="v3-l
 const V3 = { ready: false, raf: 0, lastFrame: 0, lastT: -1, uiQ: -1, uiDirty: true, dirty: true,
   cam: { mode: "follow", az: -0.75, el: 0.95, dist: 9, tx: DOOR_X, tz: 4 }, heading: Math.PI, speedIdx: 1, loop: true };
 let threeLoading = null;
+// The detailed toilet model needs three.js's glTF loader (same version as three.js, r128).
+let gltfLoading = null;
+const loadToiletModel = () => (gltfLoading ||= new Promise((res, rej) => {
+  if (window.THREE.GLTFLoader) return res();
+  const s = document.createElement("script");
+  s.src = "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js";
+  s.onload = () => res(); s.onerror = () => { gltfLoading = null; s.remove(); rej(new Error("GLTFLoader failed to load")); };
+  document.head.appendChild(s);
+})).then(() => new Promise((res, rej) => new THREE.GLTFLoader().load("models/toilet.glb", res, undefined, rej)));
 const FORCE_FLAT = /[?&]flat\b/.test(location.search);
 const loadThree = () => threeLoading ||= new Promise((res, rej) => {
   if (window.THREE) return res();
@@ -1921,11 +1930,28 @@ function v3Init() {
     const hinge = new T.Group(); hinge.position.set(hx, 1.0, SF); hinge.rotation.y = Math.PI / 2; scene.add(hinge);
     box(0.7, 1.6, 0.03, partMat, 0.35, 0, 0, hinge);
   }
+  // Toilets: simple shapes first; on computers and phones the detailed model (models/toilet.glb,
+  // from Toilet.blend) replaces them once it loads.
+  const simpleToilets = [];
   for (const xc of [-0.75, 0.75]) {
     const bowl = add(new T.CylinderGeometry(0.19, 0.15, 0.4, seg), fixture, xc, 0.2, -3.3); bowl.scale.z = 1.25;
     const seatM = add(new T.TorusGeometry(0.17, 0.035, HQ ? 16 : 8, seg), fixture, xc, 0.42, -3.3); seatM.rotation.x = Math.PI / 2; seatM.scale.y = 1.25;
-    box(0.42, 0.38, 0.18, fixture, xc, 0.62, RZ0 + 0.1, scene, 0.04);
+    simpleToilets.push(bowl, seatM, box(0.42, 0.38, 0.18, fixture, xc, 0.62, RZ0 + 0.1, scene, 0.04));
   }
+  if (HQ) loadToiletModel().then(gltf => {
+    simpleToilets.forEach(m => m.visible = false);
+    gltf.scene.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = o.receiveShadow = true;
+      if (!o.material.userData.zoned) { zm("Toilets + urinals", o.material); o.material.userData.zoned = true; }
+    });
+    for (const xc of [-0.75, 0.75]) {
+      const t = gltf.scene.clone(true);
+      t.position.set(xc, 0, RZ0 + 0.02);           // tank against the back wall, bowl facing the stall door
+      scene.add(t);
+    }
+    V3.dirty = true;
+  }).catch(e => console.warn("3D View: toilet model not loaded, keeping the simple toilets", e));
   // Accessible stall (left): grab bars on the side and far walls.
   const bar1 = add(new T.CylinderGeometry(0.02, 0.02, 0.9, 12), chrome, RX0 + 0.05, 0.85, -3.05); bar1.rotation.x = Math.PI / 2;
   const bar2 = add(new T.CylinderGeometry(0.02, 0.02, 0.8, 12), chrome, -0.75, 0.85, RZ0 + 0.04); bar2.rotation.z = Math.PI / 2;
