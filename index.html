@@ -2032,7 +2032,23 @@ function v3Init() {
   const cart = new T.Group(); scene.add(cart);
   box(0.5, 0.06, 0.9, M(0x2e3238, { roughness: 0.45 }), 0, 0.28, 0, cart, 0.02);
   box(0.5, 0.6, 0.22, M(0x24272c, { roughness: 0.5 }), 0, 0.6, -0.34, cart, 0.03);
-  add(new T.CylinderGeometry(0.2, 0.18, 0.55, seg), M(0x6f7479, { roughness: 0.6 }), 0, 0.58, 0.15, cart);
+  const simpleBin = add(new T.CylinderGeometry(0.2, 0.18, 0.55, seg), M(0x6f7479, { roughness: 0.6 }), 0, 0.58, 0.15, cart);
+  // The cart's bin: models/bin.glb (from trash_bin_upload.blend), lid removed, black bag inside.
+  if (HQ) loadModel("models/bin.glb").then(gltf => {
+    simpleBin.visible = false;
+    gltf.scene.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = o.receiveShadow = true;
+      o.material = /metal/i.test(o.material.name)
+        ? M(0x6f7479, { roughness: 0.6 })                                   // grey plastic, as in the video
+        : P(0x101012, { roughness: 0.35, clearcoat: 0.3 });                 // black garbage bag
+    });
+    const b = gltf.scene, S = 0.5 / 0.794;            // 0.5 m across to fit the cart
+    b.scale.setScalar(S);
+    b.position.set(1.729 * S, 0.31, 0.15);            // model sits off-centre in its file
+    cart.add(b);
+    V3.dirty = true;
+  }).catch(e => console.warn("3D View: bin model not loaded, keeping the simple bin", e));
   for (const [x, z] of [[-0.2, -0.38], [0.2, -0.38], [-0.2, 0.38], [0.2, 0.38]]) add(new T.CylinderGeometry(0.05, 0.05, 0.04, 16), M(0x15171a, { roughness: 0.8 }), x, 0.05, z, cart).rotation.z = Math.PI / 2;
   const sign = new T.Group(); sign.position.set(SIGN_POS[0], 0, SIGN_POS[1]); scene.add(sign);
   const yellow = P(0xffcc00, { roughness: 0.4, clearcoat: 0.5, emissive: HQ ? 0x000000 : 0x332600 });
