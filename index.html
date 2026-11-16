@@ -611,6 +611,8 @@
 // hardware gets lighter video and no per-frame animation. ?full or ?lite in the URL overrides.
 const LITE = (() => {
   try { const q = new URLSearchParams(location.search); if (q.has("full")) return false; if (q.has("lite")) return true; } catch (e) {}
+  // A Mac or PC is never the glasses, even in a small window: full quality there.
+  if (/Macintosh|Windows NT|X11|CrOS/.test(navigator.userAgent)) return false;
   return matchMedia("(max-width: 720px) and (max-height: 720px)").matches || (window.screen.width <= 720 && window.screen.height <= 720);
 })();
 if (LITE) document.documentElement.classList.add("lite");
@@ -649,25 +651,27 @@ class VideoCanvas {
   // Clear (show the poster underneath) until the next clip's first frame arrives.
   clear() { this.g.clearRect(0, 0, this.c.width, this.c.height); }
   paint() {
-    const v = this.v, c = this.c, cw = c.clientWidth, ch = c.clientHeight;
+    // On-screen size (after the display's scale-to-fit), so the canvas is never stretched.
+    const v = this.v, c = this.c, box = c.getBoundingClientRect(), cw = box.width, ch = box.height;
     if (!cw || !ch || v.readyState < 2 || !v.videoWidth) return;     // nothing new: keep the last frame
-    const r = LITE ? 1 : Math.min(devicePixelRatio || 1, 2), W = Math.round(cw * r), H = Math.round(ch * r);
+    const r = Math.min(devicePixelRatio || 1, 2), W = Math.min(2400, Math.round(cw * r)), H = Math.min(2400, Math.round(ch * r));
     if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
     const s = Math.max(W / v.videoWidth, H / v.videoHeight), dw = v.videoWidth * s, dh = v.videoHeight * s;
+    this.g.imageSmoothingQuality = "high";
     this.g.drawImage(v, (W - dw) / 2, (H - dh) / 2, dw, dh);           // same crop as object-fit: cover
   }
 }
-// Light clips: on the glasses, or anywhere playback keeps stalling (a slow connection).
-let SLOW_NET = LITE;
+// Clip sizes: full (1152 × 1536) on computers and phones, lite (600 × 800, the glasses' native
+// size) in lightweight mode, glass (450 × 600) only where playback keeps stalling.
+let SLOW_NET = false;
 // ?v= changes whenever the clips are re-encoded, so browsers and the glasses fetch the new files.
 const CLIP_VERSION = 2;
-const clipSrc = src => (SLOW_NET ? src.replace("video/", "video/glass/") : src) + "?v=" + CLIP_VERSION;
+const clipSrc = src => (SLOW_NET ? src.replace("video/", "video/glass/") : LITE ? src.replace("video/", "video/lite/") : src) + "?v=" + CLIP_VERSION;
 class SegPlayer {
   constructor(video, clips) {
     this.v = video;
     let at = 0;
-    // Lightweight mode plays the 450 × 600 copies in video/glass/: about 0.5 Mbps, baseline H.264
-    // with a keyframe every second, so the glasses' slow link and small decoder keep up.
+    // Which file each clip plays from (full, lite or glass) is chosen when it loads: see clipSrc.
     this.segs = clips.map(([src, dur]) => { const sg = { src, start: at, dur }; at += dur; return sg; });
     if (LITE) video.preload = "auto";          // buffer ahead instead of fetching just in time
     this.duration = at;
@@ -711,7 +715,7 @@ class SegPlayer {
       this.i = k;
       this.v.src = clipSrc(sg.src);
       const next = this.segs[k + 1];
-      if (next && !SLOW_NET) this.warm.src = clipSrc(next.src);   // slow link: no background download
+      if (next && !SLOW_NET && !LITE) this.warm.src = clipSrc(next.src);   // glasses / slow link: no background download
     }
     if (this.v.readyState >= 1) go();
     else this.v.addEventListener("loadedmetadata", go, { once: true });
