@@ -301,6 +301,16 @@
   @keyframes hintfade { to { opacity: 0; visibility: hidden; } }
   /* Lightweight mode (glasses-sized screens): skip the costly effects. */
   .lite .fade { animation: fadeLite .25s ease-out; }
+  /* Glasses: nothing animates over a playing video, and its rounded corners are drawn by a still
+     black frame on top instead of clipping the video (clipping plus overlays made video flash). */
+  .lite .bigplay, .lite .bigplay.idle { transition: none; }
+  .lite .bigplay.idle { visibility: hidden; }
+  .lite .media, .lite #sop .player { overflow: visible; border-radius: 0; }
+  .lite .media::after, .lite #sop .player::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    border-radius: 28px; box-shadow: 0 0 0 80px #000;
+  }
+  .lite #sop .player::after { border-radius: 24px; }
   @keyframes fadeLite { from { opacity: 0; } to { opacity: 1; } }
   .lite #wheel .wedge, .lite #hubRing, .lite .hubbtn { transition: none; }
   .lite #sop .panel { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(22, 22, 24, .88); }
@@ -1179,7 +1189,8 @@ on("homeBtn", goHome);
 on("hubBtn", openTrack);
 on("trackHomeBtn", goHome);
 on("bigPlay", togglePlay);
-document.getElementById("step").addEventListener("pointermove", () => { if (clip) wakeBigPlay(); });
+// Glasses: no pointer-move wake (stray pointer moves kept the button fading in and out over the video).
+if (!LITE) document.getElementById("step").addEventListener("pointermove", () => { if (clip) wakeBigPlay(); });
 document.getElementById("step").addEventListener("pointerdown", () => { if (clip) wakeBigPlay(); });
 slideVideo.addEventListener("click", togglePlay);
 on("listBtn", openTasks);
