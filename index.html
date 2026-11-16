@@ -198,7 +198,7 @@
   button.clear:hover, button.clear:focus-visible { box-shadow: 0 0 6px 2px var(--brand), 0 0 16px 6px var(--brand), 0 0 34px 10px color-mix(in srgb, var(--brand) 60%, transparent); }
   button.clear.primary { border-width: 5px; }
   button:focus-visible { outline: none; }
-  #wheel:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+  #wheel:focus, #wheel:focus-visible { outline: none; }   /* selection is shown by the glow, not a box */
   .hint { font: 400 15px var(--body); letter-spacing: -.01em; color: var(--dim); text-align: center; }
 
   /* Step slides (modeled on the SiteVue.AR "Assembly animation" cards) */
@@ -299,6 +299,15 @@
   /* The home hint shows for 5 s each time the wheel appears, then fades away slowly. */
   #homeHint.autofade { animation: hintfade 1.8s ease-in-out 5s forwards; }
   @keyframes hintfade { to { opacity: 0; visibility: hidden; } }
+  /* Lightweight mode (glasses-sized screens): skip the costly effects. */
+  .lite .fade { animation: fadeLite .25s ease-out; }
+  @keyframes fadeLite { from { opacity: 0; } to { opacity: 1; } }
+  .lite #wheel .wedge, .lite #hubRing, .lite .hubbtn { transition: none; }
+  .lite #sop .panel { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(22, 22, 24, .88); }
+  .lite .logo { height: 28px; }
+  /* Over playing video, glows and shadows must be re-blended every frame: keep them flat. */
+  .lite .slidebar i { box-shadow: none; }
+  .lite #step.has-clip .slidelabel, .lite #step.has-clip .slidecount, .lite #step.has-clip #stepTitle { text-shadow: none; }
   .fade { animation: fade .38s var(--ease); }
   @keyframes fade { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { #wheel .wedge, #hubRing, .hubbtn { transition: none; } .fade { animation: none; } #wheel .wedge .outline { transition: none; } }
@@ -446,6 +455,13 @@
 // The restroom walkthrough ships as short high-quality clips (each under the 15 MB file limit).
 // SegPlayer plays them as one continuous timeline on a single <video>: seek(t) jumps to any
 // second of the whole walkthrough, and `range` loops one stretch of it (a step's slide).
+// Lightweight mode: on glasses-sized screens (Meta Ray-Ban Display is 600 × 600) the low-power
+// hardware gets lighter video and no per-frame animation. ?full or ?lite in the URL overrides.
+const LITE = (() => {
+  try { const q = new URLSearchParams(location.search); if (q.has("full")) return false; if (q.has("lite")) return true; } catch (e) {}
+  return matchMedia("(max-width: 720px) and (max-height: 720px)").matches;
+})();
+if (LITE) document.documentElement.classList.add("lite");
 const RESTROOM_CLIPS = [
   ["video/r01a.mp4", 27.003], ["video/r01b.mp4", 26.865],  // clip 1-2-3 (two halves)
   ["video/r02.mp4", 18.363],                                // clip 3.2
@@ -460,7 +476,8 @@ class SegPlayer {
   constructor(video, clips) {
     this.v = video;
     let at = 0;
-    this.segs = clips.map(([src, dur]) => { const sg = { src, start: at, dur }; at += dur; return sg; });
+    // Lightweight mode plays the 600 × 800 copies in video/lite/ (the display is 600 × 600).
+    this.segs = clips.map(([src, dur]) => { const sg = { src: LITE ? src.replace("video/", "video/lite/") : src, start: at, dur }; at += dur; return sg; });
     this.duration = at;
     this.i = -1;
     this.paused = true;
@@ -642,7 +659,7 @@ function applyAngle() {
 function animate() {
   const d = angleTarget - angle;
   vel = (vel + d * 0.14) * 0.7;
-  angle = (Math.abs(d) < 0.05 && Math.abs(vel) < 0.05) || reduceMotion ? angleTarget : angle + vel;
+  angle = (Math.abs(d) < 0.05 && Math.abs(vel) < 0.05) || reduceMotion || LITE ? angleTarget : angle + vel;
   if (angle === angleTarget) vel = 0;
   applyAngle();
   raf = angle === angleTarget ? null : requestAnimationFrame(animate);
@@ -888,7 +905,7 @@ function prev() {
   }
 }
 function goHome() { drawWheel(); show("home"); }
-function openTrack() { setHubFocus(true); show("track"); }
+function openTrack() { setHubFocus(true); renderClock(true); show("track"); }
 function pinch() {
   if (screen === "step") return togglePlay();
   if (screen === "tasks") return;
@@ -1071,7 +1088,10 @@ document.getElementById("clockActions").addEventListener("click", e => {
   }
 });
 renderClock(true);
-setInterval(() => { if (clock.day !== today()) { rollOverDay(); renderClock(true); } else renderClock(false); }, 1000);
+setInterval(() => {
+  if (clock.day !== today()) { rollOverDay(); renderClock(true); }
+  else if (screen === "track") renderClock(false);   // only redraw while Time Tracking is on screen
+}, 1000);
 
 
 // ---------- Restroom SOP monitor ----------
@@ -1199,6 +1219,15 @@ document.getElementById("sopFull").addEventListener("click", () => {
 
 // ---------- fit the 600×600 display to any screen ----------
 function fit() {
+  const stage = document.getElementById("stage");
+  if (LITE) {
+    // Draw at native size on the glasses: no fractional scaling to re-rasterize every frame.
+    let s = Math.min(innerWidth / 600, innerHeight / 600);
+    if (s > 0.97) s = 1;
+    stage.style.transform = s === 1 ? "none" : `scale(${s})`;
+    stage.style.margin = s === 1 ? "0" : `${(600 * s - 600) / 2}px`;
+    return;
+  }
   const pad = 32;
   let s = Math.min((innerWidth - pad) / 600, (innerHeight - 24) / 600, 1.6);
   // Keep the wheel clear of the corner logo: if the centered display would reach under the
@@ -1207,7 +1236,6 @@ function fit() {
   if (logo.width && (innerWidth - 600 * s) / 2 < logo.right + 12) {
     s = Math.min(s, (innerHeight - 2 * (logo.bottom + 12)) / 600);
   }
-  const stage = document.getElementById("stage");
   stage.style.transform = `scale(${s})`;
   stage.style.margin = `${(600 * s - 600) / 2}px ${(600 * s - 600) / 2}px`;
 }
