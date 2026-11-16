@@ -1945,9 +1945,11 @@ function v3Init() {
   for (const arm of [armL, armR]) add(capsule(0.077, 0.18), handMat, 0, -0.62, 0, arm);   // glove over the hand
   const legL = limb(-0.112, HIPY + 0.09, 0.09, HIPY + 0.18, deep), legR = limb(0.112, HIPY + 0.09, 0.09, HIPY + 0.18, deep);   // feet on the floor
   // Broom / mop held in front while sweeping and mopping.
-  const tool = new T.Group(); tool.position.set(0.05, 0.75, 0.45); tool.rotation.x = 0.55; av.add(tool);
-  add(new T.CylinderGeometry(0.02, 0.02, 1.4, 12), M(0xc9a36b, { roughness: 0.5 }), 0, 0, 0, tool);
-  const toolHead = box(0.42, 0.06, 0.12, M(0x444a52, { roughness: 0.8 }), 0, -0.7, 0, tool, 0.02);
+  // Broom / mop: held in the right hand. Each frame it's placed with the handle through the right
+  // glove and the head on the floor in front (see v3Draw).
+  const tool = new T.Group(); av.add(tool);
+  const toolHandle = add(new T.CylinderGeometry(0.02, 0.02, 1, 12), M(0xc9a36b, { roughness: 0.5 }), 0, 0, 0, tool);
+  const toolHead = box(0.42, 0.06, 0.12, M(0x444a52, { roughness: 0.8 }), 0, -1, 0, tool, 0.02);
   const ring = add(new T.RingGeometry(0.38, 0.48, 48), new T.MeshBasicMaterial({ color: 0x9b30ff, transparent: true, opacity: 0.85, side: T.DoubleSide, toneMapped: false }), 0, 0.02, 0, av);
   ring.rotation.x = -Math.PI / 2; ring.castShadow = ring.receiveShadow = false;
   const chevron = add(new T.CircleGeometry(0.12, 3), new T.MeshBasicMaterial({ color: 0x9b30ff, toneMapped: false }), 0, 0.021, 0.62, av);
@@ -1960,7 +1962,7 @@ function v3Init() {
   scene.add(trail);
 
   canvas.addEventListener("webglcontextlost", e => { e.preventDefault(); V3.ready = false; useFlat(); });
-  Object.assign(V3, { T, renderer, scene, camera, av, legL, legR, armL, armR, handMat, skin, glove, tool, toolHead, cart, sign, trail, trailPos, trailGeo, zoneMats,
+  Object.assign(V3, { T, renderer, scene, camera, av, legL, legR, armL, armR, handMat, skin, glove, tool, toolHead, toolHandle, down: new T.Vector3(0, -1, 0), tmp: new T.Vector3(), cart, sign, trail, trailPos, trailGeo, zoneMats,
     labels: [...document.querySelectorAll("#v3Labels .v3-label")], vec: new T.Vector3(), ready: true, dirty: true });
   v3Resize();
   bindCanvas(canvas);
@@ -2100,6 +2102,18 @@ function v3Draw(t) {
   else if (!moving && p.look) { V3.armR.rotation.x = -1.2 + Math.sin(t * 10) * 0.35; V3.armL.rotation.x = -0.2; }
   else { V3.armL.rotation.x = -swing * 0.8; V3.armR.rotation.x = swing * 0.8; }
   V3.tool.visible = floorWork;
+  if (floorWork) {
+    // Right hand position in the avatar's space (shoulder pivot, arm swung by rotation.x).
+    const a = V3.armR.rotation.x, L = 0.62;
+    const hx = 0.30, hy = 1.33 - L * Math.cos(a), hz = -L * Math.sin(a);
+    // Broom head on the floor ahead, swishing side to side.
+    const fx = 0.18 + Math.sin(t * 6) * 0.14, fy = 0.03, fz = hz + 0.5;
+    const dx = fx - hx, dy = fy - hy, dz = fz - hz, dist = Math.hypot(dx, dy, dz);
+    V3.tool.position.set(hx, hy, hz);
+    V3.tool.quaternion.setFromUnitVectors(V3.down, V3.tmp.set(dx / dist, dy / dist, dz / dist));
+    V3.toolHandle.scale.y = dist + 0.3; V3.toolHandle.position.y = (0.3 - dist) / 2;   // grip 30 cm from the top
+    V3.toolHead.position.y = -dist;
+  }
   V3.toolHead.material.color.setHex(inWin(t, MOP_T) ? 0x9fd8e6 : 0x444a52);
   av.visible = cam.mode !== "eyes";
   // Cart: outside until the cleaner enters, then parked inside to the right of the door.
