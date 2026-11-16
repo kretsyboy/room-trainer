@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="SiteVue AI training for Meta Ray-Ban Display: restroom, office, kitchen, lobby and breakroom cleaning steps, with time tracking.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" type="image/png" sizes="64x64" href="favicon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
 <style>
   /* Base reset (matches the claude.ai artifact page wrapper this app was built in). */
   :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
@@ -693,12 +699,27 @@ function show(name) {
   }
   document.getElementById("logo").hidden = name !== "home";
   fit();                                   // the logo only takes room on the home screen
+  syncHistory();
   if (name === "home") {
     document.getElementById("wheel").focus({ preventScroll: true });
     const hint = document.getElementById("homeHint");
     hint.classList.remove("autofade"); void hint.offsetWidth; hint.classList.add("autofade");
   }
 }
+// Back gesture: while away from the home wheel the app keeps one history entry, so the glasses'
+// Back (browser back) steps back inside the app instead of leaving it.
+let awayEntry = false;
+function syncHistory() {
+  const away = screen !== "home" || (typeof sopOpen !== "undefined" && sopOpen);
+  if (away && !awayEntry) { try { history.pushState({ away: true }, ""); awayEntry = true; } catch (e) {} }
+}
+addEventListener("popstate", () => {
+  awayEntry = false;
+  if (sopOpen) closeSop();
+  else if (screen === "tasks") { renderStep(); show("step"); }
+  else if (screen !== "home") goHome();
+  syncHistory();                           // still away: keep an entry for the next Back
+});
 function openRoom() {
   roomIdx = selected;
   stepIdx = 0; renderStep(); show("step");
@@ -1140,6 +1161,7 @@ function openSop(fromSlides = false) {
   slidePlayer.pause();
   sopOpen = true;
   sopEl.hidden = false;
+  syncHistory();
   sopSegments();
   sopPlayer.seek(0, true);
   sopRender();
