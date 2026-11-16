@@ -315,7 +315,7 @@
   /* ---------- 3D View pull-out tab (right edge) ---------- */
   .tab3d {
     position: fixed; z-index: 60; right: 0; top: 50%;
-    transform: translate(16px, -50%);
+    transform: translate(2px, -50%);
     display: flex; flex-direction: column; align-items: center; gap: 8px;
     padding: 14px 10px 14px 9px; margin: 0;
     background: rgba(18, 16, 24, .88); color: var(--pearl);
@@ -327,7 +327,7 @@
   .tab3d span { writing-mode: vertical-rl; transform: rotate(180deg); letter-spacing: .02em; white-space: nowrap; }
   /* On hover (or Neural Band focus) the tab slides out toward the middle and glows purple. */
   .tab3d:hover, .tab3d:focus-visible {
-    transform: translate(-6px, -50%); outline: none; border-color: var(--brand);
+    transform: translate(-12px, -50%); outline: none; border-color: var(--brand);
     box-shadow: 0 0 6px 2px var(--brand), 0 0 18px 4px color-mix(in srgb, var(--brand) 55%, transparent);
   }
   .lite .tab3d, .lite .tab3d:hover, .lite .tab3d:focus-visible { transition: none; }
@@ -1096,9 +1096,17 @@ function stepKeys(k) {
   const row = visibleButtons(document.querySelector("#step .slidefoot"));
   const a = document.activeElement;
   const inRow = row.includes(a);
+  const tab = tab3d.hidden ? null : tab3d;
+  // The 3D View tab on the right edge: swipe up from the slide (or from Mark step done), or swipe
+  // right past the last bottom button. Swipe left or down to come back; pinch opens it.
+  if (a === tab3d) {
+    if (k === "ArrowLeft") row[row.length - 1]?.focus();
+    else if (k === "ArrowDown") check.focus();
+    return k.startsWith("Arrow");
+  }
   if (k === "ArrowDown") { if (a === check) row[0]?.focus(); else if (!inRow) check.focus(); return true; }
-  // ↑ with nothing focused reaches the 3D View tab on the right edge.
-  if (k === "ArrowUp") { if (inRow) check.focus(); else if (a === check) check.blur(); else if (!tab3d.hidden) tab3d.focus(); return true; }
+  if (k === "ArrowUp") { if (inRow) check.focus(); else if (tab) tab.focus(); else check.blur(); return true; }
+  if (inRow && k === "ArrowRight" && a === row[row.length - 1] && tab) { tab.focus(); return true; }
   if (inRow && (k === "ArrowLeft" || k === "ArrowRight")) { moveFocus(row, k === "ArrowRight" ? 1 : -1); return true; }
   return false;
 }
@@ -1114,7 +1122,7 @@ document.addEventListener("keydown", e => {
     if (k === "Escape" || k === "Backspace") close3d();
     else if (k === "Enter" || k === " ") v3Toggle();
     else if (k === "ArrowLeft" || k === "ArrowRight") moveFocus(visibleButtons(v3El), k === "ArrowRight" ? 1 : -1);
-    else if (k === "ArrowUp" || k === "ArrowDown") v3Seek(v3Player.time + (k === "ArrowUp" ? 10 : -10));
+    else if (k === "ArrowUp" || k === "ArrowDown") v3Seek(TL.time() + (k === "ArrowUp" ? 10 : -10));
     else return;
     e.preventDefault();
     return;
@@ -1406,6 +1414,23 @@ var v3open = false;
 const v3El = document.getElementById("view3d"), tab3d = document.getElementById("tab3d");
 const v3Video = document.getElementById("v3Video");
 const v3Player = new SegPlayer(v3Video, RESTROOM_CLIPS);
+// The 3D View's clock: the walkthrough video while it's shown, otherwise a plain timer. On the
+// glasses the video starts hidden, so the low-power chip only has the scene to draw.
+const TL = {
+  video: true, base: 0, start: 0, stopped: true, rate: 1,
+  time() { return this.video ? v3Player.time : this.stopped ? this.base : Math.min(v3Player.duration, this.base + (performance.now() - this.start) / 1000 * this.rate); },
+  get paused() { return this.video ? v3Player.paused : this.stopped; },
+  play() { if (this.video) v3Player.play(); else if (this.stopped) { this.start = performance.now(); this.stopped = false; } },
+  pause() { if (this.video) v3Player.pause(); else if (!this.stopped) { this.base = this.time(); this.stopped = true; } },
+  seek(t, play = !this.paused) { if (this.video) v3Player.seek(t, play); else { this.base = t; this.start = performance.now(); this.stopped = !play; } },
+  setRate(r) { if (!this.video) { this.base = this.time(); this.start = performance.now(); } this.rate = r; v3Video.defaultPlaybackRate = v3Video.playbackRate = r; },
+  useVideo(on) {
+    if (on === this.video) return;
+    const t = this.time(), play = !this.paused;
+    if (on) { this.video = true; this.stopped = true; v3Player.seek(t, play); }
+    else { v3Player.pause(); this.video = false; this.base = t; this.start = performance.now(); this.stopped = !play; }
+  },
+};
 function updateTab3d() {
   const restroomSlides = screen === "step" && ROOMS[roomIdx].id === "bathrooms";
   tab3d.hidden = v3open || !(sopOpen || restroomSlides);
@@ -1500,6 +1525,7 @@ document.getElementById("v3Labels").innerHTML = ZONES.map(z => `<div class="v3-l
 const V3 = { ready: false, raf: 0, lastFrame: 0, lastT: -1, uiQ: -1, uiDirty: true, dirty: true,
   cam: { mode: "follow", az: 0.6, el: 0.95, dist: 9, tx: DOOR_X, tz: 3 }, heading: Math.PI, speedIdx: 1, loop: true };
 let threeLoading = null;
+const FORCE_FLAT = /[?&]flat\b/.test(location.search);
 const loadThree = () => threeLoading ||= new Promise((res, rej) => {
   if (window.THREE) return res();
   const s = document.createElement("script");
@@ -1522,8 +1548,11 @@ for (let j = 0; j < GZ; j++) for (let i = 0; i < GX; i++) {
 }
 function covReset() {
   COV.cells.fill(0); COV.swept = COV.mopped = 0; COV.next = 0;
-  if (COV.ctx) { COV.ctx.clearRect(0, 0, GX, GZ); COV.tex.needsUpdate = true; }
+  COV.ctx.clearRect(0, 0, GX, GZ);
+  if (COV.tex) COV.tex.needsUpdate = true;
 }
+COV.canvas = document.createElement("canvas"); COV.canvas.width = GX; COV.canvas.height = GZ;
+COV.ctx = COV.canvas.getContext("2d");
 function covMark(s) {
   const kind = inWin(s, SWEEP_T) ? 1 : inWin(s, MOP_T) ? 2 : 0;
   if (!kind) return false;
@@ -1580,8 +1609,6 @@ function v3Init() {
   for (let y = 0; y <= 500; y += 50) { tc.beginPath(); tc.moveTo(0, y); tc.lineTo(700, y); tc.stroke(); }
   const floorTex = new T.CanvasTexture(tile);
   const floor = add(new T.PlaneGeometry(7, 5), M(0xffffff, { map: floorTex }), 0, 0, 0); floor.rotation.x = -Math.PI / 2;
-  COV.canvas = document.createElement("canvas"); COV.canvas.width = GX; COV.canvas.height = GZ;
-  COV.ctx = COV.canvas.getContext("2d");
   COV.tex = new T.CanvasTexture(COV.canvas);
   const covMesh = add(new T.PlaneGeometry(7, 5), new T.MeshBasicMaterial({ map: COV.tex, transparent: true, depthWrite: false }), 0, 0.006, 0);
   covMesh.rotation.x = -Math.PI / 2;
@@ -1664,6 +1691,7 @@ function v3Init() {
   const trail = new T.Line(trailGeo, new T.LineBasicMaterial({ color: 0xc58bff, transparent: true, opacity: 0.7 }));
   scene.add(trail);
 
+  canvas.addEventListener("webglcontextlost", e => { e.preventDefault(); V3.ready = false; useFlat(); });
   Object.assign(V3, { T, renderer, scene, camera, av, legL, legR, armL, armR, handMat, skin, glove, tool, toolHead, cart, sign, trail, trailPos, trailGeo, zoneMats,
     labels: [...document.querySelectorAll("#v3Labels .v3-label")], vec: new T.Vector3(), ready: true, dirty: true });
   v3Resize();
@@ -1672,10 +1700,92 @@ function v3Init() {
 
 function v3Resize() {
   if (!V3.ready) return;
-  const c = V3.renderer.domElement, w = c.clientWidth || innerWidth, h = c.clientHeight || innerHeight;
-  V3.renderer.setSize(w, h, false);
-  V3.camera.aspect = w / h; V3.camera.updateProjectionMatrix();
+  const c = document.getElementById("v3Canvas"), w = c.clientWidth || innerWidth, h = c.clientHeight || innerHeight;
+  if (V3.flat) {
+    const r = LITE ? 1 : Math.min(devicePixelRatio || 1, 2);
+    c.width = Math.round(w * r); c.height = Math.round(h * r);
+    V3.ctx2d.setTransform(r, 0, 0, r, 0, 0);
+  } else {
+    V3.renderer.setSize(w, h, false);
+    V3.camera.aspect = w / h; V3.camera.updateProjectionMatrix();
+  }
   V3.w = w; V3.h = h; V3.dirty = true;
+}
+// If this browser has no WebGL (or three.js can't download), the 3D View becomes a live top-down
+// map of the same scene: room, coverage, trail, avatar and zones. ?flat in the URL forces it.
+function useFlat() {
+  if (V3.flat) return;
+  const old = document.getElementById("v3Canvas"), c = document.createElement("canvas");
+  c.id = "v3Canvas"; c.setAttribute("aria-label", "Restroom map");
+  old.replaceWith(c);                       // a canvas that tried WebGL can't switch to 2D
+  Object.assign(V3, { flat: true, ready: true, ctx2d: c.getContext("2d"), labels: [...document.querySelectorAll("#v3Labels .v3-label")] });
+  document.querySelector(".v3-cams").hidden = true;
+  document.querySelector(".v3-hint").hidden = true;
+  document.getElementById("v3Loading").hidden = true;
+  v3Resize();
+}
+const LABEL_2D = { "Entrance": [DOOR_X, 2.75], "Floor": [0.6, 0.7], "Trash": [-2.45, 2.05], "Mirrors": [-2.45, 0.2], "Sinks": [-2.45, 1.0], "Toilets + urinals": [0.6, -1.7] };
+function v3Draw2D(t) {
+  const g = V3.ctx2d, W = V3.w, H = V3.h;
+  covUpdate(t);
+  // Fit the room and the hallway (x -3.6 to 3.9, z -2.6 to 4.7) between the side panels.
+  const left = Math.min(W * 0.31, 270), right = W - Math.min(W * 0.23, 250), top = 96, bottom = H - 66;
+  const s = Math.min((right - left) / 7.6, (bottom - top) / 7.3);
+  const ox = (left + right) / 2 - 0.15 * s, oz = (top + bottom) / 2 - 1.05 * s;
+  const X = x => ox + x * s, Z = z => oz + z * s;
+  const rect = (x0, z0, x1, z1, fill) => { g.fillStyle = fill; g.fillRect(X(x0), Z(z0), (x1 - x0) * s, (z1 - z0) * s); };
+  const dot = (x, z, r, fill) => { g.fillStyle = fill; g.beginPath(); g.arc(X(x), Z(z), r * s, 0, Math.PI * 2); g.fill(); };
+  const line = (pts, color, w) => { g.strokeStyle = color; g.lineWidth = w * s; g.beginPath(); pts.forEach(([x, z], i) => i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z))); g.stroke(); };
+  const live = id => ZONES.find(z => z.id === id).when.some(w => inWin(t, w));
+  const HL = "rgba(155,48,255,.45)";
+  g.clearRect(0, 0, W, H);
+  rect(1.4, 2.55, 3.95, 4.8, "#2a2d34");
+  rect(-3.5, -2.5, 3.5, 2.5, "#d8d3c6");
+  g.strokeStyle = "rgba(120,112,98,.35)"; g.lineWidth = 1; g.beginPath();
+  for (let x = -3; x < 3.5; x += 0.5) { g.moveTo(X(x), Z(-2.5)); g.lineTo(X(x), Z(2.5)); }
+  for (let z = -2; z < 2.5; z += 0.5) { g.moveTo(X(-3.5), Z(z)); g.lineTo(X(3.5), Z(z)); }
+  g.stroke();
+  g.imageSmoothingEnabled = true;
+  g.drawImage(COV.canvas, X(-3.5), Z(-2.5), 7 * s, 5 * s);
+  // Fixtures (purple while being worked).
+  rect(-3.5, -0.2, -2.92, 2.0, "#8d8577");
+  for (const z of [0.25, 0.9, 1.55]) dot(-3.18, z, 0.17, live("Sinks") ? "#c58bff" : "#f6f6f3");
+  line([[-3.46, -0.15], [-3.46, 1.95]], live("Mirrors") ? "#9b30ff" : "#aecbdc", 0.09);
+  dot(-3.1, 2.25, 0.2, live("Trash") ? "#9b30ff" : "#5b6068");
+  const fix = live("Toilets + urinals") ? "#c58bff" : "#f7f7f4";
+  if (live("Toilets + urinals")) rect(-3.3, -2.5, 2.4, -1.0, HL);
+  for (const x of [-2.55, -1.9]) rect(x - 0.19, -2.5, x + 0.19, -2.2, fix);
+  for (const xc of [-0.6, 0.6, 1.8]) { rect(xc - 0.21, -2.5, xc + 0.21, -2.32, fix); g.fillStyle = fix; g.beginPath(); g.ellipse(X(xc), Z(-2.05), 0.19 * s, 0.25 * s, 0, 0, Math.PI * 2); g.fill(); }
+  for (const x of [-1.2, 0, 1.2, 2.4]) line([[x, -2.5], [x, -1.0]], "#6c7a8c", 0.05);
+  line([[-2.225, -2.5], [-2.225, -2.0]], "#6c7a8c", 0.04);
+  if (live("Entrance")) rect(DOOR[0], 1.9, DOOR[1], 2.55, HL);
+  // Walls, with the door gap at the front right.
+  const wall = "#9a958b";
+  line([[-3.55, 2.55], [-3.55, -2.55], [3.55, -2.55], [3.55, 2.55], [DOOR[1], 2.55]], wall, 0.1);
+  line([[DOOR[0], 2.55], [-3.55, 2.55]], wall, 0.1);
+  // Cart and wet floor sign.
+  const k = Math.max(0, Math.min(1, (t - 9) / 3)), cz = 3.4 + (1.2 - 3.4) * k;
+  rect(2.75, cz - 0.45, 3.25, cz + 0.45, "#4a4f57"); dot(3.0, cz + 0.15, 0.17, "#f2c230");
+  if (t >= SIGN_AT) { g.fillStyle = "#ffcc00"; g.beginPath(); g.moveTo(X(2.05), Z(1.8)); g.lineTo(X(2.27), Z(2.2)); g.lineTo(X(1.83), Z(2.2)); g.closePath(); g.fill(); }
+  // Trail (last 30 s), then the avatar with a pointer for its facing.
+  const trail = []; for (let n = 0; n < 61; n++) { const q = posAt(Math.max(0, t - 30 + n * 0.5)); trail.push([q.x, q.z]); }
+  g.globalAlpha = 0.8; line(trail, "#c58bff", 0.05); g.globalAlpha = 1;
+  const p = posAt(t), a = posAt(t - 0.3), b = posAt(t + 0.3), vx = b.x - a.x, vz = b.z - a.z;
+  if (Math.hypot(vx, vz) > 0.05) V3.heading = Math.atan2(vx, vz); else if (p.look) V3.heading = Math.atan2(p.look[0] - p.x, p.look[1] - p.z);
+  g.strokeStyle = "#9b30ff"; g.lineWidth = 0.09 * s; g.beginPath(); g.arc(X(p.x), Z(p.z), 0.43 * s, 0, Math.PI * 2); g.stroke();
+  const hx = Math.sin(V3.heading), hz = Math.cos(V3.heading);
+  g.fillStyle = "#9b30ff"; g.beginPath();
+  g.moveTo(X(p.x + hx * 0.62), Z(p.z + hz * 0.62)); g.lineTo(X(p.x - hz * 0.2), Z(p.z + hx * 0.2)); g.lineTo(X(p.x + hz * 0.2), Z(p.z - hx * 0.2)); g.closePath(); g.fill();
+  dot(p.x, p.z, 0.24, "#9b30ff"); dot(p.x + hx * 0.1, p.z + hz * 0.1, 0.08, "#f1eee6");
+  // Zone labels.
+  ZONES.forEach((z, i) => {
+    const el = V3.labels[i], on = z.when.some(w => inWin(t, w)), done = z.when.every(w => t >= Math.min(w[1], v3Player.duration - 0.3));
+    el.classList.toggle("live", on); el.classList.toggle("done", done && !on);
+    const [lx, lz] = LABEL_2D[z.id];
+    el.style.display = "";
+    el.style.transform = `translate(${X(lx).toFixed(1)}px, ${Z(lz).toFixed(1)}px) translate(-50%, -50%)`;
+  });
+  V3.lastT = t; V3.dirty = false;
 }
 addEventListener("resize", () => { if (v3open) v3Resize(); });
 
@@ -1800,7 +1910,7 @@ function v3Ui(t) {
   const max = innerWidth <= 720 ? 2 : 4;
   document.getElementById("v3Feed").innerHTML = V3_EVENTS.filter(e => e[0] <= t).slice(-max).reverse()
     .map(([at, txt, warn]) => `<li${warn ? ' class="warn"' : ""}><b>${mmss(at)}</b><span>${txt}</span></li>`).join("");
-  const playing = !v3Player.paused;
+  const playing = !TL.paused;
   const pb = document.getElementById("v3Play");
   pb.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
   pb.setAttribute("aria-label", playing ? "Pause" : "Play");
@@ -1811,12 +1921,14 @@ function v3Frame(now) {
   V3.raf = requestAnimationFrame(v3Frame);
   if (LITE && now - V3.lastFrame < 66) return;        // glasses: about 15 fps is plenty
   V3.lastFrame = now;
-  const t = v3Player.time;
+  if (!TL.video && !TL.stopped && TL.time() >= v3Player.duration - 0.05) { V3.loop ? TL.seek(0, true) : TL.pause(); V3.uiDirty = true; }
+  const t = TL.time();
   const q = Math.floor(t * 4);
   if (q !== V3.uiQ || V3.uiDirty) { V3.uiQ = q; V3.uiDirty = false; covUpdate(t); v3Ui(t); }
   if (!V3.ready) return;
   const c = V3.cam, settling = c.mode !== "eyes" && c.mode !== "orbit" && c.mode !== "top"
     && Math.hypot(posAt(t).x - c.tx, posAt(t).z - c.tz) > 0.01;
+  if (V3.flat) { if (V3.dirty || Math.abs(t - V3.lastT) > 0.004) v3Draw2D(t); return; }
   if (V3.dirty || Math.abs(t - V3.lastT) > 0.004 || settling) v3Draw(t);
 }
 
@@ -1827,29 +1939,34 @@ function open3d() {
   updateTab3d(); syncHistory();
   V3.uiDirty = true; V3.dirty = true;
   const c = V3.cam, p = posAt(t0); c.tx = p.x; c.tz = p.z;
-  v3Player.seek(t0, true);
+  TL.seek(t0, true);
   cancelAnimationFrame(V3.raf); V3.raf = requestAnimationFrame(v3Frame);
   document.getElementById("v3Play").focus({ preventScroll: true });
   const loading = document.getElementById("v3Loading");
   loading.hidden = !!V3.ready; loading.textContent = "Loading 3D view…";
-  loadThree().then(() => {
-    if (!V3.ready) v3Init();
+  if (V3.ready) { v3Resize(); return; }
+  if (FORCE_FLAT) { useFlat(); return; }
+  // three.js comes from a CDN; if it's slow or blocked, or WebGL fails, show the 2D map instead.
+  const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 12000));
+  Promise.race([loadThree(), timeout]).then(() => {
+    if (V3.ready) return;
+    try { v3Init(); } catch (e) { console.warn("3D View: WebGL unavailable, showing the map", e); return useFlat(); }
     loading.hidden = true;
     v3Resize();
-  }).catch(() => { loading.textContent = "The 3D view couldn't load. Check the connection and try again."; });
+  }).catch(() => { if (!V3.ready) useFlat(); });
 }
 function close3d() {
   if (!v3open) return;
   v3open = false; v3El.hidden = true;
-  v3Player.pause();
+  TL.pause();
   cancelAnimationFrame(V3.raf);
   updateTab3d();
   if (sopOpen) sopPlayer.play();
   else if (screen === "step" && clip && !slidePaused) slidePlayer.play();
   if (!tab3d.hidden) tab3d.focus({ preventScroll: true });
 }
-const v3Toggle = () => { v3Player.paused ? v3Player.play() : v3Player.pause(); V3.uiDirty = true; };
-const v3Seek = t => { v3Player.seek(Math.max(0, Math.min(v3Player.duration - 0.1, t))); V3.uiDirty = true; V3.dirty = true; };
+const v3Toggle = () => { TL.paused ? TL.play() : TL.pause(); V3.uiDirty = true; };
+const v3Seek = t => { TL.seek(Math.max(0, Math.min(v3Player.duration - 0.1, t))); V3.uiDirty = true; V3.dirty = true; };
 v3Player.onTime = () => {};
 v3Player.onEnd = () => { if (V3.loop) v3Player.seek(0, true); V3.uiDirty = true; };
 v3Video.addEventListener("click", v3Toggle);
@@ -1860,13 +1977,19 @@ on("v3Restart", () => v3Seek(0));
 on("v3Speed", () => {
   const speeds = [0.5, 1, 1.5, 2];
   V3.speedIdx = (V3.speedIdx + 1) % speeds.length;
-  v3Video.defaultPlaybackRate = v3Video.playbackRate = speeds[V3.speedIdx];
+  TL.setRate(speeds[V3.speedIdx]);
   document.getElementById("v3Speed").textContent = speeds[V3.speedIdx] + "×";
 });
 on("v3VidBtn", e => {
   const box = document.getElementById("v3VideoBox"), show = box.hidden;
   box.hidden = !show; e.currentTarget.setAttribute("aria-pressed", show);
+  TL.useVideo(show); V3.uiDirty = true;
 });
+if (LITE) {   // glasses: video off to start (one tap of "Video" brings it back, in sync)
+  document.getElementById("v3VideoBox").hidden = true;
+  document.getElementById("v3VidBtn").setAttribute("aria-pressed", "false");
+  TL.video = false;
+}
 document.querySelectorAll("#view3d [data-cam]").forEach(b => b.addEventListener("click", () => setCam(b.dataset.cam)));
 document.getElementById("v3Steps").addEventListener("click", e => {
   const b = e.target.closest("button[data-i]"); if (b) v3Seek(SOP[+b.dataset.i].start + 0.05);
