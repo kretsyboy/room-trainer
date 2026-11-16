@@ -623,7 +623,9 @@ const RESTROOM_CLIPS = [
 ];
 // Light clips: on the glasses, or anywhere playback keeps stalling (a slow connection).
 let SLOW_NET = LITE;
-const clipSrc = src => SLOW_NET ? src.replace("video/", "video/glass/") : src;
+// ?v= changes whenever the clips are re-encoded, so browsers and the glasses fetch the new files.
+const CLIP_VERSION = 2;
+const clipSrc = src => (SLOW_NET ? src.replace("video/", "video/glass/") : src) + "?v=" + CLIP_VERSION;
 class SegPlayer {
   constructor(video, clips) {
     this.v = video;
