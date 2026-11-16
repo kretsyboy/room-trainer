@@ -618,12 +618,17 @@ const RESTROOM_CLIPS = [
   ["video/r07.mp4", 9.065],                                 // clip 7
   ["video/r08.mp4", 21.230],                                // clip 8
 ];
+// Light clips: on the glasses, or anywhere playback keeps stalling (a slow connection).
+let SLOW_NET = LITE;
+const clipSrc = src => SLOW_NET ? src.replace("video/", "video/glass/") : src;
 class SegPlayer {
   constructor(video, clips) {
     this.v = video;
     let at = 0;
-    // Lightweight mode plays the 600 × 800 copies in video/lite/ (the display is 600 × 600).
-    this.segs = clips.map(([src, dur]) => { const sg = { src: LITE ? src.replace("video/", "video/lite/") : src, start: at, dur }; at += dur; return sg; });
+    // Lightweight mode plays the 450 × 600 copies in video/glass/: about 0.5 Mbps, baseline H.264
+    // with a keyframe every second, so the glasses' slow link and small decoder keep up.
+    this.segs = clips.map(([src, dur]) => { const sg = { src, start: at, dur }; at += dur; return sg; });
+    if (LITE) video.preload = "auto";          // buffer ahead instead of fetching just in time
     this.duration = at;
     this.i = -1;
     this.paused = true;
@@ -635,6 +640,14 @@ class SegPlayer {
     this.warm.preload = "auto"; this.warm.muted = true;
     video.addEventListener("timeupdate", () => this.tick());
     video.addEventListener("ended", () => this.advance());
+    // Two stalls within 15 s while playing (not just after loading a clip): switch to light clips.
+    this.stalls = [];
+    video.addEventListener("waiting", () => {
+      const now = performance.now();
+      if (SLOW_NET || this.paused || now - (this.loadedAt || 0) < 2000) return;
+      this.stalls = this.stalls.filter(t => now - t < 15000).concat(now);
+      if (this.stalls.length >= 2) { SLOW_NET = true; const t = this.time; this.i = -1; this.seek(t, true); }
+    });
   }
   get time() { return this.i < 0 ? 0 : this.segs[this.i].start + (this.v.currentTime || 0); }
   segAt(t) {
@@ -645,6 +658,7 @@ class SegPlayer {
     const k = Math.max(0, this.segAt(t)), sg = this.segs[k], local = Math.max(0, t - sg.start);
     this.paused = !play;
     const token = ++this.seekToken;           // only the latest seek may act when its clip loads
+    this.loadedAt = performance.now();        // a wait right after a seek or load isn't a stall
     const go = () => {
       if (token !== this.seekToken) return;
       this.v.currentTime = local;
@@ -653,9 +667,9 @@ class SegPlayer {
     };
     if (k !== this.i) {
       this.i = k;
-      this.v.src = sg.src;
+      this.v.src = clipSrc(sg.src);
       const next = this.segs[k + 1];
-      if (next && !LITE) this.warm.src = next.src;   // glasses: no background download
+      if (next && !SLOW_NET) this.warm.src = clipSrc(next.src);   // slow link: no background download
     }
     if (this.v.readyState >= 1) go();
     else this.v.addEventListener("loadedmetadata", go, { once: true });
@@ -2006,6 +2020,34 @@ document.getElementById("v3Track").addEventListener("click", e => {
 v3Video.addEventListener("seeked", () => { V3.uiDirty = true; });
 v3Video.addEventListener("play", () => { V3.uiDirty = true; });
 v3Video.addEventListener("pause", () => { V3.uiDirty = true; });
+
+// ?debug: a live readout of the video pipeline (buffering, stalls, reloads), for checking playback
+// on the glasses.
+if (/[?&]debug\b/.test(location.search)) {
+  const box = document.createElement("pre");
+  box.style.cssText = "position:fixed;z-index:99;left:4px;top:4px;margin:0;padding:6px 8px;font:600 11px/1.35 ui-monospace,monospace;color:#0f0;background:rgba(0,0,0,.75);border-radius:6px;pointer-events:none;white-space:pre";
+  document.body.appendChild(box);
+  const watch = [["slide", slideVideo], ["sop", sopVideo], ["3d", v3Video]];
+  const stats = new Map(watch.map(([, v]) => [v, { waiting: 0, stalled: 0, loads: 0, seeks: 0, pauses: 0, errors: 0 }]));
+  for (const [, v] of watch) {
+    const st = stats.get(v);
+    v.addEventListener("waiting", () => st.waiting++); v.addEventListener("stalled", () => st.stalled++);
+    v.addEventListener("loadstart", () => st.loads++); v.addEventListener("seeking", () => st.seeks++);
+    v.addEventListener("pause", () => st.pauses++); v.addEventListener("error", () => st.errors++);
+  }
+  setInterval(() => {
+    const lines = [`lite ${LITE}  ${innerWidth}x${innerHeight}  dpr ${devicePixelRatio}`];
+    for (const [name, v] of watch) {
+      if (!v.currentSrc) continue;
+      let ahead = 0;
+      for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime && v.buffered.end(i) >= v.currentTime) ahead = v.buffered.end(i) - v.currentTime;
+      const st = stats.get(v), q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
+      lines.push(`${name} ${v.currentSrc.split("/").slice(-2).join("/")} t${v.currentTime.toFixed(1)} rs${v.readyState} ${v.paused ? "PAUSED" : "play"} ${v.muted ? "muted" : "sound"}`,
+        `  ahead ${ahead.toFixed(1)}s  wait ${st.waiting} stall ${st.stalled} load ${st.loads} seek ${st.seeks} pause ${st.pauses} err ${st.errors}` + (q ? `  drop ${q.droppedVideoFrames}/${q.totalVideoFrames}` : ""));
+    }
+    box.textContent = lines.join("\n");
+  }, 500);
+}
 
 // ---------- fit the 600×600 display to any screen ----------
 function fit() {
