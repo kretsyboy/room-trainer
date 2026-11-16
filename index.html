@@ -1836,18 +1836,23 @@ function v3Init() {
 
   // Floor: glossy 30 cm porcelain tiles with grout, plus the coverage layer just above it.
   const RW = RX1 - RX0, RL = RZ1 - RZ0, RCX = (RX0 + RX1) / 2, RCZ = (RZ0 + RZ1) / 2;
-  const FW = HQ ? 640 : 320, FH = Math.round(FW * RL / RW), tilePx = FW / (RW / 0.3);
+  // Floor, matched to the video: 20 cm light warm-grey porcelain tiles (#CAC6BF lit) with dark
+  // grey grout, faint flecks and slight tile-to-tile variation; tiles semi-gloss, grout matte.
+  const TILE = 0.2, FW = HQ ? 1024 : 320, FH = Math.round(FW * RL / RW), tilePx = FW / (RW / TILE), GR = HQ ? 2 : 1;
   const floorMap = tex(FW, FH, (g, w, h) => {
-    g.fillStyle = "#b9b2a4"; g.fillRect(0, 0, w, h);
+    g.fillStyle = "#6e6b66"; g.fillRect(0, 0, w, h);
     for (let y = 0; y < h; y += tilePx) for (let x = 0; x < w; x += tilePx) {
-      const v = (HQ ? 200 : 214) + Math.floor(Math.random() * 10 - 5);
-      g.fillStyle = `rgb(${v},${v - 4},${v - 10})`; g.fillRect(x + 1.5, y + 1.5, tilePx - 3, tilePx - 3);
-      if (HQ) { g.fillStyle = "rgba(255,255,255,.05)"; g.fillRect(x + 2, y + 2, tilePx - 4, (tilePx - 4) / 2); }
+      const v = 203 + Math.floor(Math.random() * 8 - 4);
+      g.fillStyle = `rgb(${v},${v - 4},${v - 11})`; g.fillRect(x + GR / 2, y + GR / 2, tilePx - GR, tilePx - GR);
+      if (HQ) for (let k = 0; k < 40; k++) {                        // porcelain flecks
+        g.fillStyle = Math.random() < 0.5 ? "rgba(120,114,106,.22)" : "rgba(255,255,255,.18)";
+        g.fillRect(x + GR + Math.random() * (tilePx - 2 * GR), y + GR + Math.random() * (tilePx - 2 * GR), 1, 1);
+      }
     }
   });
   const floorRough = HQ ? tex(FW / 2, FH / 2, (g, w, h) => {
     const t = tilePx / 2; g.fillStyle = "#fff"; g.fillRect(0, 0, w, h);
-    for (let y = 0; y < h; y += t) for (let x = 0; x < w; x += t) { const v = 60 + Math.floor(Math.random() * 30); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x + 1, y + 1, t - 2, t - 2); }
+    for (let y = 0; y < h; y += t) for (let x = 0; x < w; x += t) { const v = 70 + Math.floor(Math.random() * 25); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x + 1, y + 1, t - 2, t - 2); }
   }, { linear: true }) : null;
   const floor = add(new T.PlaneGeometry(RW, RL), M(0xffffff, { map: floorMap, ...(HQ ? { roughnessMap: floorRough, roughness: 1, envMapIntensity: 0.8 } : {}) }), RCX, 0, RCZ);
   floor.rotation.x = -Math.PI / 2; floor.castShadow = false;
@@ -1869,24 +1874,18 @@ function v3Init() {
 
   // Walls: the fixture wall (right) and far wall full height, with a glossy subway-tile band; the
   // plain left wall and entry wall cut away low so the room stays visible.
-  const wallMat = M(0xebe7df, { roughness: 0.9 }), trimMat = M(0xd6d1c7, { roughness: 0.7 });
+  // Walls, matched to the video: matte grey-white paint (#C2BFBC lit) with a faint roller texture,
+  // and a dark grey rubber base along the floor. No tile band (the room in the video has none).
+  const paintTex = tex(256, 256, (g, w, h) => {
+    g.fillStyle = "#dcd9d4"; g.fillRect(0, 0, w, h);
+    for (let k = 0; k < 9000; k++) { const v = 205 + Math.floor(Math.random() * 30); g.fillStyle = `rgba(${v},${v - 2},${v - 6},.35)`; g.fillRect(Math.random() * w, Math.random() * h, 1.5, 1.5); }
+  }, { repeat: [1, 1] });
+  const wallMat = M(0xffffff, { map: paintTex, roughness: 0.92 }), trimMat = wallMat;
   box(0.1, 2.4, RL + 0.2, wallMat, RX1 + 0.05, 1.2, RCZ, scene, 0.01);
   box(RW + 0.2, 2.4, 0.1, wallMat, RCX, 1.2, RZ0 - 0.05, scene, 0.01);
-  if (HQ) {
-    const subway = (len) => tex(1024, Math.round(1024 * 1.2 / len), (g, w, h) => {
-      const tw = w / (len / 0.15), th = h / (1.2 / 0.075);
-      g.fillStyle = "#c9c6bf"; g.fillRect(0, 0, w, h);
-      for (let r = 0, y = 0; y < h; r++, y += th) for (let x = (r % 2) * -tw / 2; x < w; x += tw) {
-        const v = 240 + Math.floor(Math.random() * 8 - 4); g.fillStyle = `rgb(${v},${v - 2},${v - 6})`; g.fillRect(x + 1, y + 1, tw - 2, th - 2);
-      }
-    });
-    const tileMat = (len) => M(0xffffff, { map: subway(len), roughness: 0.22, envMapIntensity: 1 });
-    const right = add(new T.PlaneGeometry(RL, 1.2), tileMat(RL), RX1 - 0.005, 0.6, RCZ); right.rotation.y = -Math.PI / 2; right.castShadow = false;
-    const backW = add(new T.PlaneGeometry(RW, 1.2), tileMat(RW), RCX, 0.6, RZ0 + 0.005); backW.castShadow = false;
-    const steel = M(0xb8bcc2, { metalness: 0.9, roughness: 0.25 });
-    box(0.03, 0.03, RL, steel, RX1 - 0.015, 1.215, RCZ);
-    box(RW, 0.03, 0.03, steel, RCX, 1.215, RZ0 + 0.015);
-  }
+  const baseMat = M(0x3c3c3e, { roughness: 0.75 });
+  box(0.012, 0.1, RL, baseMat, RX1 - 0.006, 0.05, RCZ);
+  box(RW, 0.1, 0.012, baseMat, RCX, 0.05, RZ0 + 0.006);
   box(0.1, 0.3, RL + 0.2, trimMat, RX0 - 0.05, 0.15, RCZ);
   box(DOOR[0] - RX0 + 0.1, 0.3, 0.1, trimMat, (RX0 - 0.1 + DOOR[0]) / 2, 0.15, RZ1 + 0.05);
   box(RX1 + 0.1 - DOOR[1], 0.3, 0.1, trimMat, (DOOR[1] + RX1 + 0.1) / 2, 0.15, RZ1 + 0.05);
@@ -1900,7 +1899,20 @@ function v3Init() {
 
   // Vanity on the right wall: cabinet, granite top, 3 porcelain basins, chrome faucets, long mirror.
   const VZ = 1.9, VL = 2.2;
-  const woodMat = M(0x6e5a46, { roughness: 0.65 }), graniteMat = P(0x5d5d60, { roughness: 0.32, clearcoat: 0.6 });
+  // Granite top, matched to the video: grey salt-and-pepper (black, greys, white) at 2–4 mm grain,
+  // polished. 1 px = 1 mm; repeats every metre.
+  const graniteTex = tex(HQ ? 1024 : 256, HQ ? 1024 : 256, (g, w, h) => {
+    const k = w / 1024;
+    g.fillStyle = "#7d7976"; g.fillRect(0, 0, w, h);
+    const cols = [["#2a2929", 0.17], ["#55524f", 0.26], ["#8f8b87", 0.22], ["#b6b2ae", 0.2], ["#dedbd7", 0.1], ["#9c8b83", 0.05]];
+    for (let n = 0; n < 160000 * k * k; n++) {
+      let r = Math.random(), c = cols[0][0];
+      for (const [cc, p] of cols) { if ((r -= p) <= 0) { c = cc; break; } }
+      const sz = (0.5 + Math.random() * Math.random() * 1.9) * k;
+      g.fillStyle = c; g.beginPath(); g.ellipse(Math.random() * w, Math.random() * h, sz, sz * (0.6 + Math.random() * 0.4), Math.random() * 3, 0, Math.PI * 2); g.fill();
+    }
+  }, { repeat: [1, 1] });
+  const woodMat = M(0x6e5a46, { roughness: 0.65 }), graniteMat = P(0xffffff, { map: graniteTex, roughness: 0.3, clearcoat: 0.6 });
   const cabinet = box(0.5, 0.78, VL, woodMat, RX1 - 0.25, 0.43, VZ, scene, 0.015);
   const solidTop = box(0.58, 0.05, VL + 0.05, graniteMat, RX1 - 0.27, 0.845, VZ, scene, 0.012);
   const sinkMat = zm("Sinks", P(0xf8f8f6)), chrome = M(0xe3e6ea, { metalness: 1, roughness: 0.1 });
@@ -1941,7 +1953,7 @@ function v3Init() {
     for (const z of SINK_Z) {
       const sk = gltf.scene.clone(true);
       sk.rotation.y = -Math.PI / 2;                 // mixer toward the wall
-      sk.position.set(CX, TOP_Y - 0.114, z);        // rim just above the counter top
+      sk.position.set(CX, TOP_Y - 0.08, z);         // rim resting on the counter top, as in the video
       scene.add(sk);
     }
     V3.dirty = true;
@@ -1953,7 +1965,7 @@ function v3Init() {
   add(new T.CylinderGeometry(0.21, 0.21, 0.04, seg), M(0x2e3236, { metalness: 0.6, roughness: 0.4 }), 1.3, 0.66, 3.5);
 
   // Two wall-hung urinals past the vanity, with privacy screens; two stalls across the far end.
-  const fixture = zm("Toilets + urinals", P(0xf8f8f6)), partMat = M(0xb7bdc5, { metalness: 0.85, roughness: 0.33 });
+  const fixture = zm("Toilets + urinals", P(0xf8f8f6)), partMat = M(0xa4a7a8, { metalness: 0.15, roughness: 0.5 });   // grey powder-coat, as in the video
   const URINAL_Z = [0.1, -0.75], simpleUrinals = [];
   for (const z of URINAL_Z) {
     simpleUrinals.push(box(0.3, 0.55, 0.38, fixture, RX1 - 0.15, 0.85, z, scene, 0.08),
