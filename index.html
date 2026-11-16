@@ -1771,6 +1771,26 @@ function v3Init() {
     return t;
   };
 
+  // Wood grain: long, slightly wavy streaks in darker and lighter tones over a base colour, with fine
+  // fibres. The texture is 1 m wide and 2 m tall, grain running along its height.
+  const woodTexture = (base, dark, light) => tex(HQ ? 512 : 128, HQ ? 1024 : 256, (g, w, h) => {
+    g.fillStyle = base; g.fillRect(0, 0, w, h);
+    const k = w / 512;
+    for (let i = 0; i < 260; i++) {
+      // Whole number of waves over the height, so the grain lines up where the texture repeats.
+      const x0 = Math.random() * w, amp = (1 + Math.random() * 5) * k, f = 2 * Math.PI * (1 + Math.floor(Math.random() * 6)) / h, ph = Math.random() * 6.3;
+      g.strokeStyle = Math.random() < 0.6 ? dark : light;
+      g.globalAlpha = 0.05 + Math.random() * 0.22; g.lineWidth = (0.6 + Math.random() * 2.6) * k;
+      g.beginPath();
+      for (let y = 0; y <= h; y += 8 * k) { const x = x0 + Math.sin(y * f + ph) * amp; y ? g.lineTo(x, y) : g.moveTo(x, y); }
+      if (x0 + amp > w) { g.moveTo(x0 - w, 0); for (let y = 0; y <= h; y += 8 * k) g.lineTo(x0 - w + Math.sin(y * f + ph) * amp, y); }   // wrap across the side edge
+      g.stroke();
+    }
+    g.globalAlpha = 0.08;
+    for (let i = 0; i < 4000 * k; i++) { g.fillStyle = Math.random() < 0.5 ? dark : light; g.fillRect(Math.random() * w, Math.random() * (h - 24 * k), 1, (4 + Math.random() * 18) * k); }
+    g.globalAlpha = 1;
+  }, { repeat: [1, 0.5] });
+
   if (HQ) {
     renderer.outputEncoding = T.sRGBEncoding;
     renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95;
@@ -1894,7 +1914,8 @@ function v3Init() {
   box(0.08, 2.2, 0.14, doorMat, DOOR[0], 1.1, RZ1 + 0.05); box(0.08, 2.2, 0.14, doorMat, DOOR[1], 1.1, RZ1 + 0.05);
   box(DOOR[1] - DOOR[0] + 0.08, 0.12, 0.14, doorMat, DOOR_X, 2.2, RZ1 + 0.05);
   const entryHinge = new T.Group(); entryHinge.position.set(DOOR[0] + 0.04, 1.05, RZ1 + 0.12); entryHinge.rotation.y = -1.5; scene.add(entryHinge);
-  box(0.84, 2.08, 0.045, M(0xb98a52, { roughness: 0.55 }), 0.42, 0, 0, entryHinge, 0.01);
+  box(0.84, 2.08, 0.045, M(0xffffff, { map: woodTexture("#b98a52", "#7d5329", "#d6aa70"), roughness: 0.5 }), 0.42, 0, 0, entryHinge, 0.01);   // honey oak
+  const doors = [{ hinge: entryHinge, width: 0.84, height: 2.08, thick: 0.045, floorY: entryHinge.position.y }];
   const mat = add(new T.PlaneGeometry(0.95, 0.7), zm("Entrance", M(0x2c3036, { roughness: 0.95 })), DOOR_X, 0.004, RZ1 - 0.4); mat.rotation.x = -Math.PI / 2; mat.castShadow = false;
 
   // Vanity on the right wall: cabinet, granite top, 3 porcelain basins, chrome faucets, long mirror.
@@ -1912,7 +1933,7 @@ function v3Init() {
       g.fillStyle = c; g.beginPath(); g.ellipse(Math.random() * w, Math.random() * h, sz, sz * (0.6 + Math.random() * 0.4), Math.random() * 3, 0, Math.PI * 2); g.fill();
     }
   }, { repeat: [1, 1] });
-  const woodMat = M(0x6e5a46, { roughness: 0.65 }), graniteMat = P(0xffffff, { map: graniteTex, roughness: 0.3, clearcoat: 0.6 });
+  const woodMat = M(0xffffff, { map: woodTexture("#7a6048", "#4a3626", "#987a5c"), roughness: 0.55 }), graniteMat = P(0xffffff, { map: graniteTex, roughness: 0.3, clearcoat: 0.6 });
   const cabinet = box(0.5, 0.78, VL, woodMat, RX1 - 0.25, 0.43, VZ, scene, 0.015);
   const solidTop = box(0.58, 0.05, VL + 0.05, graniteMat, RX1 - 0.27, 0.845, VZ, scene, 0.012);
   const sinkMat = zm("Sinks", P(0xf8f8f6)), chrome = M(0xe3e6ea, { metalness: 1, roughness: 0.1 });
@@ -1960,9 +1981,9 @@ function v3Init() {
   }).catch(e => console.warn("3D View: sink model not loaded, keeping the simple sinks", e));
   box(0.02, 0.95, VL - 0.05, zm("Mirrors", HQ ? M(0xffffff, { metalness: 1, roughness: 0.03, envMapIntensity: 1.3 }) : M(0xaecbdc, { emissive: 0x14202a })), RX1 - 0.015, 1.72, VZ, scene, 0.005);
   // Small trash can in the corner by the vanity: brushed steel.
-  const bin = zm("Trash", M(0x9aa0a8, { metalness: 0.85, roughness: 0.35 }));
-  add(new T.CylinderGeometry(0.2, 0.17, 0.65, seg), bin, 1.3, 0.325, 3.5);
-  add(new T.CylinderGeometry(0.21, 0.21, 0.04, seg), M(0x2e3236, { metalness: 0.6, roughness: 0.4 }), 1.3, 0.66, 3.5);
+  const binMat = zm("Trash", M(0x9aa0a8, { metalness: 0.85, roughness: 0.35 }));
+  const simpleCan = [add(new T.CylinderGeometry(0.2, 0.17, 0.65, seg), binMat, 1.3, 0.325, 3.5),
+    add(new T.CylinderGeometry(0.21, 0.21, 0.04, seg), M(0x2e3236, { metalness: 0.6, roughness: 0.4 }), 1.3, 0.66, 3.5)];
 
   // Two wall-hung urinals past the vanity, with privacy screens; two stalls across the far end.
   const fixture = zm("Toilets + urinals", P(0xf8f8f6)), partMat = M(0xa4a7a8, { metalness: 0.15, roughness: 0.5 });   // grey powder-coat, as in the video
@@ -2000,6 +2021,7 @@ function v3Init() {
   for (const hx of [-1.15, 1.15]) {                                      // doors swung in against the panel
     const hinge = new T.Group(); hinge.position.set(hx, 1.0, SF); hinge.rotation.y = Math.PI / 2; scene.add(hinge);
     box(0.7, 1.6, 0.03, partMat, 0.35, 0, 0, hinge);
+    doors.push({ hinge, width: 0.7, height: 1.6, thick: 0.03, floorY: 1.0 });
   }
   // Toilets: simple shapes first; on computers and phones the detailed model (models/toilet.glb,
   // from Toilet.blend) replaces them once it loads.
@@ -2028,6 +2050,32 @@ function v3Init() {
   const bar1 = add(new T.CylinderGeometry(0.02, 0.02, 0.9, 12), chrome, RX0 + 0.05, 0.85, -3.05); bar1.rotation.x = Math.PI / 2;
   const bar2 = add(new T.CylinderGeometry(0.02, 0.02, 0.8, 12), chrome, -0.75, 0.85, RZ0 + 0.04); bar2.rotation.z = Math.PI / 2;
 
+  // Two barrel hinges per door on the hinge edge, 20 cm from the top and the bottom: a knuckle at the
+  // edge and a leaf on each face, brushed steel like the handles.
+  const hingeMetal = M(0xb8bcc2, { metalness: 0.9, roughness: 0.3 });
+  for (const d of doors) for (const y of [d.height / 2 - 0.2, -d.height / 2 + 0.2]) {
+    const k = add(new T.CylinderGeometry(0.011, 0.011, 0.1, 16), hingeMetal, -0.004, y, 0, d.hinge);   // knuckle
+    for (const side of [1, -1]) box(0.04, 0.09, 0.003, hingeMetal, 0.02, y, side * (d.thick / 2 + 0.0015), d.hinge, 0.001);   // leaves
+    k.castShadow = false;
+  }
+
+  // Door handles (models/door_handle.glb, CC0 lever on a round rosette, real size): on both faces of
+  // every door, 6 cm in from the latch edge and 1.0 m above the floor, levers pointing to the hinge.
+  if (HQ) loadModel("models/door_handle.glb").then(gltf => {
+    const ROSETTE_X = 0.0525, PLATE = 0.024;           // rosette centre and plate depth in the model
+    gltf.scene.traverse(o => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+    // In the model the rosette is at x -0.0525 with the lever running +x and the plate on -z. Turned
+    // half-way round (about z for the front face, about y for the back), the lever runs toward the
+    // hinge and the rosette lands at x +0.0525, so the origin sits 0.0525 short of the latch spot.
+    for (const d of doors) {
+      const x = d.width - 0.06 - ROSETTE_X, y = 1.0 - d.floorY, z = d.thick / 2 + PLATE;
+      const front = gltf.scene.clone(true); front.rotation.z = Math.PI; front.position.set(x, y, z);
+      const back = gltf.scene.clone(true); back.rotation.y = Math.PI; back.position.set(x, y, -z);
+      d.hinge.add(front, back);
+    }
+    V3.dirty = true;
+  }).catch(e => console.warn("3D View: door handle model not loaded", e));
+
   // Cleaning cart (gray bin and caddy) and the yellow wet floor sign.
   const cart = new T.Group(); scene.add(cart);
   box(0.5, 0.06, 0.9, M(0x2e3238, { roughness: 0.45 }), 0, 0.28, 0, cart, 0.02);
@@ -2036,7 +2084,18 @@ function v3Init() {
   // The cart's bin: models/bin.glb (from trash_bin_upload.blend): bin, lid, and the black bag's cuff under the lid.
   // Glossy black bag; drawn slightly in front of the bin's rim so the two never flicker.
   const bagMat = P(0x101012, { roughness: 0.35, clearcoat: 0.3, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
-  if (HQ) loadModel("models/bin.glb").then(gltf => {
+  const binModel = HQ ? loadModel("models/bin.glb") : null;
+  // The can by the vanity: the same bin model (lid, black bag), 0.42 m across, grey like the cart's.
+  if (HQ) binModel.then(gltf => {
+    const can = gltf.scene.clone(true), S = 0.42 / 0.794, canMat = zm("Trash", M(0x6f7479, { roughness: 0.6 }));
+    can.traverse(o => { if (o.isMesh) { o.castShadow = o.receiveShadow = true; o.material = /metal/i.test(o.material.name) ? canMat : bagMat; } });
+    can.scale.setScalar(S);
+    can.position.set(1.3 + 1.729 * S, 0, 3.5);      // model sits off-centre in its file
+    scene.add(can);
+    simpleCan.forEach(m => m.visible = false);
+    V3.dirty = true;
+  }).catch(() => {});
+  if (HQ) binModel.then(gltf => {
     simpleBin.visible = false;
     gltf.scene.traverse(o => {
       if (!o.isMesh) return;
