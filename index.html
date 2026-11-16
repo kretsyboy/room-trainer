@@ -1896,7 +1896,7 @@ function v3Init() {
   add(new T.SphereGeometry(0.15, HQ ? 32 : 16, HQ ? 24 : 12), purple, 0, 1.64, 0, av);
   box(0.2, 0.06, 0.06, HQ ? P(0x0d0d10, { roughness: 0.05, clearcoat: 1, metalness: 0.3 }) : M(0xf1eee6, { emissive: 0x444444 }), 0, 1.65, 0.12, av, 0.02);
   const armL = limb(0.055, 0.55, purple, -0.28, 1.4), armR = limb(0.055, 0.55, purple, 0.28, 1.4);
-  const handMat = M(0xd9a77f, { roughness: 0.5 });
+  const handMat = HQ ? P(0x1f6bff, { roughness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.2 }) : M(0x2d8cff);   // blue nitrile gloves
   add(new T.SphereGeometry(0.065, 16, 12), handMat, 0, -0.58, 0, armL); add(new T.SphereGeometry(0.065, 16, 12), handMat, 0, -0.58, 0, armR);
   // Broom / mop held in front while sweeping and mopping.
   const tool = new T.Group(); tool.position.set(0.05, 0.75, 0.45); tool.rotation.x = 0.55; av.add(tool);
@@ -1944,6 +1944,7 @@ function swapAvatar(d, purple, deep, HQ) {
   // One continuous skinned mesh: each vertex blends smoothly between the body and an arm or leg
   // bone near the joint, so shoulders and hips bend cleanly instead of tearing.
   const SH = [0.47, 0.05], HIP = [0.2, 1.0];          // shoulder (|x|, y) and hip (|x|, y), raw units
+  const CAP_Y = -0.62;                                 // everything above this on the head is the ball cap
   const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   const n = d.pos.length / 3;
   const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3);
@@ -1969,7 +1970,8 @@ function swapAvatar(d, purple, deep, HQ) {
     let cx = 0, cy = 0;
     for (let k = 0; k < 3; k++) { cx += d.pos[d.idx[i + k] * 3]; cy += d.pos[d.idx[i + k] * 3 + 1]; }
     cx /= 3; cy /= 3;
-    const g = Math.abs(cx) > 1.35 && cy > -0.3 && cy < 0.4 ? 2 : cy > HIP[1] ? 1 : 0;
+    if (cy < CAP_Y && Math.abs(cx) < 0.6) continue;                   // the ball cap: dropped (new head top below)
+    const g = Math.abs(cx) > 1.18 && cy > -0.3 && cy < 0.4 ? 2 : cy > HIP[1] ? 1 : 0;   // gloves: hand and wrist
     groups[g].push(d.idx[i], d.idx[i + 1], d.idx[i + 2]);
   }
   const geo = new T.BufferGeometry();
@@ -1994,6 +1996,13 @@ function swapAvatar(d, purple, deep, HQ) {
   mesh.bind(new T.Skeleton([root, armL, armR, legL, legR]));
   mesh.frustumCulled = false;
   if (HQ) mesh.castShadow = mesh.receiveShadow = true;
+  // A smooth rounded head top where the cap was, sized to the head at the cut (x ±0.33, z -0.39..0.26).
+  const headMat = purple.clone(); headMat.skinning = false;
+  const dome = new T.Mesh(new T.SphereGeometry(1, 40, 20, 0, Math.PI * 2, 0, Math.PI * 0.6), headMat);
+  dome.scale.set(0.335 * S, 0.38 * S, 0.33 * S);
+  dome.position.set(0, (Y0 - (CAP_Y + 0.04)) * S, 0.065 * S);
+  if (HQ) dome.castShadow = dome.receiveShadow = true;
+  av.add(dome);
   // Arms hang at the sides (rotation.z); the animations swing them on rotation.x.
   armL.rotation.z = 1.25; armR.rotation.z = -1.25;
   Object.assign(V3, { armL, armR, legL, legR, avatarMesh: mesh, dirty: true });
@@ -2134,7 +2143,6 @@ function v3Draw(t) {
   else { V3.armL.rotation.x = -swing * 0.8; V3.armR.rotation.x = swing * 0.8; }
   V3.tool.visible = floorWork;
   V3.toolHead.material.color.setHex(inWin(t, MOP_T) ? 0x9fd8e6 : 0x444a52);
-  V3.handMat.color.setHex(t >= GLOVES_SEEN_AT ? 0x2d8cff : 0xd9a77f);
   av.visible = cam.mode !== "eyes";
   // Cart: outside until the cleaner enters, then parked inside to the right of the door.
   const cp = cartAt(t);
