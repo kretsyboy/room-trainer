@@ -1557,16 +1557,23 @@ function updateTab3d() {
   tab3d.hidden = v3open || !sopOpen;   // on the slides, 3D View is a button in the bottom row
 }
 
-// Room plan in metres: x runs left to right (-3.5 to 3.5), z from the back wall (-2.5) to the
-// front wall (2.5). The door is in the front wall at the right; the cart waits outside it.
-const DOOR = [2.15, 3.2], DOOR_X = 2.675;
+// Room plan in metres, laid out as in the walkthrough video: a long, narrow restroom. x runs across
+// (-1.6 left wall to 1.6 right wall), z along it (-3.8 far wall to 3.8 entry wall). The wooden door
+// is in the entry wall on the left. Right wall from the door: vanity with 3 sinks and a mirror,
+// then 2 urinals with privacy screens. Far end: 2 stalls side by side (the left one accessible).
+const RX0 = -1.6, RX1 = 1.6, RZ0 = -3.8, RZ1 = 3.8;
+const DOOR = [-1.45, -0.55], DOOR_X = -1.0;
 const SWEEP_T = [182.472, 200.544], MOP_T = [209.609, 230.839], SIGN_AT = 206;
-// Floor lanes [z, from x, to x]: back wall first, working toward the door.
-// Lanes stop short of the cart (right, z 0.75 to 1.65) and the partitions.
-const LANES = [[-1.6, -3.05, -1.55], [-1.05, -1.55, -3.05], [-0.5, -2.6, 2.7], [0.1, 2.7, -2.6], [0.7, -2.6, 2.35], [1.3, 2.35, -2.6], [1.9, -2.6, 2.35]];
-// Wet floor sign: just inside the door, beside the doorway. The cart: rolled in after the cleaner.
-const SIGN_POS = [2.95, 2.15];
-const CART_PATH = [[0, 3.55, 3.6], [9, 3.55, 3.6], [10.5, DOOR_X, 3.1], [11.2, DOOR_X, 2.3], [12, 3.0, 1.2]];   // parked beside the door outside
+// Floor lanes across the room [z, from x, to x], far end first, working toward the door. They stay
+// clear of the vanity and urinals (right), the cart (left, near the door) and the stall fronts.
+const LANE_Z = [-1.68, -1.1, -0.5, 0.1, 0.7, 1.3, 1.9, 2.5, 3.1, 3.42];
+const laneSpan = z => [z > 2.2 ? -0.7 : -1.3, z > -1.35 ? 0.72 : 0.8];
+const makeLanes = zs => zs.map((z, i) => { const [a, b] = laneSpan(z); return i % 2 ? [z, b, a] : [z, a, b]; });
+const LANES = makeLanes(LANE_Z), MOP_LANES = makeLanes(LANE_Z.slice(0, 9));
+// Wet floor sign: just inside the door, to its right. The cart: waits in the hall, then rolls in
+// after the cleaner and parks along the left wall by the door.
+const SIGN_POS = [0.3, 3.6];
+const CART_PATH = [[0, 0.0, 4.5], [9, 0.0, 4.5], [10.5, DOOR_X, 4.4], [11.2, DOOR_X, 3.4], [12, -1.25, 2.7]];
 function cartAt(t) {
   const K = CART_PATH;
   if (t <= K[0][0]) return { x: K[0][1], z: K[0][2] };
@@ -1577,58 +1584,56 @@ function cartAt(t) {
   const l = K[K.length - 1]; return { x: l[1], z: l[2] };
 }
 const ZONES = [
-  { id: "Entrance", pos: [DOOR_X, 2.45, 2.55], when: [[0, 12], [200.544, 209.609]] },
-  { id: "Floor", pos: [0.3, 0.12, 0.6], when: [[12, 33], [182.472, 200.544], [209.609, 9999]] },
-  { id: "Trash", pos: [-3.1, 0.95, 2.25], when: [[33, 37]] },
-  { id: "Mirrors", pos: [-3.45, 2.3, 0.9], when: [[37, 44], [102.884, 128.087]] },
-  { id: "Sinks", pos: [-3.15, 1.15, 0.9], when: [[44, 53], [128.087, 153.219]] },
-  { id: "Toilets + urinals", pos: [-0.2, 2.05, -1.9], when: [[53, 102.884], [153.219, 182.472]] },
+  { id: "Entrance", pos: [DOOR_X, 2.45, RZ1 + 0.05], when: [[0, 12], [200.544, 209.609]] },
+  { id: "Floor", pos: [-0.4, 0.12, 0.4], when: [[12, 33], [182.472, 200.544], [209.609, 9999]] },
+  { id: "Trash", pos: [1.3, 0.95, 3.5], when: [[33, 37]] },
+  { id: "Mirrors", pos: [RX1 - 0.02, 2.3, 1.9], when: [[37, 44], [102.884, 128.087]] },
+  { id: "Sinks", pos: [1.25, 1.15, 1.9], when: [[44, 53], [128.087, 153.219]] },
+  { id: "Toilets + urinals", pos: [0.0, 2.05, -2.9], when: [[53, 102.884], [153.219, 182.472]] },
 ];
 // The cleaner's path: [seconds, x, z, the point being worked on while standing still].
 const PATH = (() => {
   const K = [];
   const at = (t, x, z, look = null) => K.push({ t, x, z, look });
-  const lanes = (t0, t1) => {
-    const pts = []; LANES.forEach(([z, a, b]) => pts.push([a, z], [b, z]));
+  const lanes = (t0, t1, list) => {
+    const pts = []; list.forEach(([z, a, b]) => pts.push([a, z], [b, z]));
     let prev = K[K.length - 1], len = 0;
     const d = pts.map(p => { const s = Math.hypot(p[0] - prev.x, p[1] - prev.z); prev = { x: p[0], z: p[1] }; len += s; return s; });
     let acc = 0; pts.forEach((p, i) => { acc += d[i]; at(t0 + (t1 - t0) * acc / len, p[0], p[1]); });
   };
-  const wallL = z => [-3.5, z], back = x => [x, -2.5];
-  // Standing spots: 0.3 m out from the counter, urinals and toilets. Between stalls the cleaner
-  // steps out into the aisle (z -0.65) instead of walking through the partitions.
-  const CX = -2.55, UZ = -1.55, SZ = -1.3, AISLE = -0.65;
+  const wallR = z => [RX1, z], back = x => [x, RZ0];
+  // Standing spots keep the cleaner ~0.3 m clear of every fixture. Stalls are entered from the aisle
+  // in front of them (z -1.6).
+  const VX = 0.7, UX = 0.8, AISLE = -1.6, SZ = -2.55;
   const stall = (t0, t1, x) => { at(t0, x, SZ, back(x)); at(t1, x, SZ, back(x)); };
-  const hop = (t0, t1, from, to) => { at(t0, from, AISLE); at(t1, to, AISLE); };
   // 1 Knock, check & enter (the cart follows the cleaner in)
-  at(0, DOOR_X, 4.3); at(4, DOOR_X, 3.05, [DOOR_X, 0]); at(9, DOOR_X, 2.95, [DOOR_X, 0]); at(10.5, 2.25, 1.55); at(12, 2.1, 1.3);
-  // 2 Pick up trash around the floor, ending at the bin
-  at(15, 1.4, 0.9); at(19, 0.2, 0.1); at(23, -1.0, 0.5); at(27, -2.1, -0.4); at(30, -2.4, 1.0); at(33, CX, 1.75, [-3.1, 2.25]);
+  at(0, DOOR_X, 4.9); at(4, DOOR_X, 4.15, [DOOR_X, 0]); at(9, DOOR_X, 4.05, [DOOR_X, 0]); at(10.5, -0.6, 2.9); at(12, -0.3, 2.2);
+  // 2 Pick up trash around the floor, ending at the bin by the vanity
+  at(15, 0.2, 1.4); at(19, -0.4, 0.3); at(23, 0.3, -0.6); at(27, -0.6, -1.3); at(30, 0.3, 1.0); at(33, 0.72, 3.32, [1.3, 3.5]);
   // 4 Empty trash (done before spraying: out of order)
-  at(37, CX, 1.75, [-3.1, 2.25]);
-  // 3 Spray mirrors, sinks, then urinals and toilets
-  at(39, CX, 1.0, wallL(1.0)); at(44, CX, 1.0, wallL(1.0));
-  at(46, CX, 0.3, wallL(0.3)); at(49, CX, 0.95, wallL(0.95)); at(53, CX, 1.6, wallL(1.6));
-  at(56, -2.55, UZ, back(-2.55)); at(58.5, -1.9, UZ, back(-1.9));
-  hop(59.4, 61.2, -1.75, -0.6); stall(62, 64.2, -0.6);
-  hop(64.8, 65.4, -0.6, 0.6); stall(66, 68.2, 0.6);
-  hop(68.8, 69.4, 0.6, 1.8); stall(70, 72.231, 1.8);
-  // 5 Wipe / scrub: urinals, mirrors, sinks, toilets
-  hop(72.9, 74.3, 1.8, -1.75); at(75, -2.55, UZ, back(-2.55)); at(88, -2.55, UZ, back(-2.55)); at(90, -1.9, UZ, back(-1.9)); at(102.884, -1.9, UZ, back(-1.9));
-  at(106, CX, 0.2, wallL(0.2)); at(126, CX, 1.8, wallL(1.8)); at(128.087, CX, 1.8, wallL(1.8));
-  at(130, CX, 1.6, wallL(1.6)); at(151, CX, 0.3, wallL(0.3)); at(153.219, CX, 0.3, wallL(0.3));
-  at(156.2, -0.6, AISLE); stall(157, 164, -0.6);
-  hop(164.6, 165.4, -0.6, 0.6); stall(166, 173, 0.6);
-  hop(173.6, 174.4, 0.6, 1.8); stall(175, SWEEP_T[0], 1.8);
-  // 6 Sweep, back wall to door
-  hop(SWEEP_T[0] + 0.6, SWEEP_T[0] + 1.8, 1.8, -1.75);
-  lanes(SWEEP_T[0] + 2.2, SWEEP_T[1]);
+  at(37, 0.72, 3.32, [1.3, 3.5]);
+  // 3 Spray mirror, sinks, then urinals and toilets
+  at(39, VX, 1.9, wallR(1.9)); at(44, VX, 1.9, wallR(1.9));
+  at(46, VX, 2.6, wallR(2.6)); at(49, VX, 1.9, wallR(1.9)); at(53, VX, 1.2, wallR(1.2));
+  at(54.5, 0.55, 0.6); at(56, UX, 0.1, wallR(0.1)); at(58.5, UX, -0.75, wallR(-0.75));
+  at(59.4, 0.75, AISLE); stall(62, 64.2, 0.75);
+  at(64.8, 0.75, AISLE); at(65.4, -0.75, AISLE); stall(66, 72.231, -0.75);
+  // 5 Wipe / scrub: urinals, mirror, sinks, toilets
+  at(72.9, -0.75, AISLE); at(74.4, 0.6, -0.3); at(75, UX, 0.1, wallR(0.1)); at(88, UX, 0.1, wallR(0.1));
+  at(90, UX, -0.75, wallR(-0.75)); at(102.884, UX, -0.75, wallR(-0.75));
+  at(104, 0.55, 0.55); at(106, VX, 1.2, wallR(1.2)); at(126, VX, 2.7, wallR(2.7)); at(128.087, VX, 2.7, wallR(2.7));
+  at(130, VX, 2.6, wallR(2.6)); at(151, VX, 1.2, wallR(1.2)); at(153.219, VX, 1.2, wallR(1.2));
+  at(155.6, 0.75, AISLE); stall(157, 168, 0.75);
+  at(168.6, 0.75, AISLE); at(169.4, -0.75, AISLE); stall(170, SWEEP_T[0], -0.75);
+  // 6 Sweep, far end to door
+  at(SWEEP_T[0] + 0.8, -0.75, AISLE);
+  lanes(SWEEP_T[0] + 1.4, SWEEP_T[1], LANES);
   // 7 Wet floor sign just inside the door
-  at(203, 2.4, 2.1); at(SIGN_AT, 2.4, 2.1, SIGN_POS); at(MOP_T[0], 2.4, 2.1, SIGN_POS);
-  // 8 Mop, back wall to door
-  at(MOP_T[0] + 1.2, 1.8, AISLE); at(MOP_T[0] + 2.2, -1.75, AISLE);
-  lanes(MOP_T[0] + 2.6, MOP_T[1] - 0.3);
-  at(MOP_T[1] + 1, 2.45, 2.3);
+  at(203, 0.3, 3.05); at(SIGN_AT, 0.3, 3.05, SIGN_POS); at(MOP_T[0], 0.3, 3.05, SIGN_POS);
+  // 8 Mop, far end to door, then out
+  at(MOP_T[0] + 1.4, 0.0, 1.0);
+  lanes(MOP_T[0] + 2.6, MOP_T[1] - 1.4, MOP_LANES);
+  at(MOP_T[1] - 0.8, -0.4, 3.2); at(MOP_T[1] - 0.3, -0.95, 3.48); at(MOP_T[1] + 0.4, DOOR_X, 4.0); at(MOP_T[1] + 1, DOOR_X, 4.5);
   return K;
 })();
 function posAt(t) {
@@ -1668,7 +1673,7 @@ document.getElementById("v3Labels").innerHTML = ZONES.map(z => `<div class="v3-l
 })();
 
 const V3 = { ready: false, raf: 0, lastFrame: 0, lastT: -1, uiQ: -1, uiDirty: true, dirty: true,
-  cam: { mode: "follow", az: 0.6, el: 0.95, dist: 9, tx: DOOR_X, tz: 3 }, heading: Math.PI, speedIdx: 1, loop: true };
+  cam: { mode: "follow", az: -0.75, el: 0.95, dist: 9, tx: DOOR_X, tz: 4 }, heading: Math.PI, speedIdx: 1, loop: true };
 let threeLoading = null;
 const FORCE_FLAT = /[?&]flat\b/.test(location.search);
 const loadThree = () => threeLoading ||= new Promise((res, rej) => {
@@ -1680,16 +1685,17 @@ const loadThree = () => threeLoading ||= new Promise((res, rej) => {
 });
 
 // ---- floor coverage: a 10 cm grid, painted as the avatar sweeps (purple) and mops (cyan) ----
-const GX = 70, GZ = 50;
+const GX = Math.round((RX1 - RX0) / 0.1), GZ = Math.round((RZ1 - RZ0) / 0.1);
 const COV = { mask: new Uint8Array(GX * GZ), cells: new Uint8Array(GX * GZ), total: 0, swept: 0, mopped: 0, next: 0, canvas: null, ctx: null, tex: null };
 for (let j = 0; j < GZ; j++) for (let i = 0; i < GX; i++) {
-  const x = -3.5 + (i + .5) * .1, z = -2.5 + (j + .5) * .1;
-  const wall = x < -3.25 || x > 3.25 || z < -2.25 || z > 2.3;
-  const counter = x < -2.9 && z > -0.3 && z < 2.1;
-  const stalls = x > -1.25 && z < -0.95;
-  const urinals = x < -1.25 && z < -2.0;
-  const cart = x > 2.75 && z > 0.7 && z < 1.7;
-  if (!(wall || counter || stalls || urinals || cart)) { COV.mask[j * GX + i] = 1; COV.total++; }
+  const x = RX0 + (i + .5) * .1, z = RZ0 + (j + .5) * .1;
+  const wall = x < RX0 + 0.25 || x > RX1 - 0.25 || z < RZ0 + 0.25 || z > RZ1 - 0.25;
+  const vanity = x > 0.95 && z > 0.75 && z < 3.05;
+  const urinals = x > 1.0 && z > -1.25 && z < 0.6;
+  const stalls = z < -1.95;
+  const cart = x < -0.95 && z > 2.2 && z < 3.2;
+  const bin = x > 1.05 && z > 3.25;
+  if (!(wall || vanity || urinals || stalls || cart || bin)) { COV.mask[j * GX + i] = 1; COV.total++; }
 }
 function covReset() {
   COV.cells.fill(0); COV.swept = COV.mopped = 0; COV.next = 0;
@@ -1703,12 +1709,12 @@ function covMark(s) {
   if (!kind) return false;
   const p = posAt(s), r = 0.5;
   let changed = false;
-  const i0 = Math.max(0, Math.floor((p.x - r + 3.5) / .1)), i1 = Math.min(GX - 1, Math.floor((p.x + r + 3.5) / .1));
-  const j0 = Math.max(0, Math.floor((p.z - r + 2.5) / .1)), j1 = Math.min(GZ - 1, Math.floor((p.z + r + 2.5) / .1));
+  const i0 = Math.max(0, Math.floor((p.x - r - RX0) / .1)), i1 = Math.min(GX - 1, Math.floor((p.x + r - RX0) / .1));
+  const j0 = Math.max(0, Math.floor((p.z - r - RZ0) / .1)), j1 = Math.min(GZ - 1, Math.floor((p.z + r - RZ0) / .1));
   for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
     const k = j * GX + i;
     if (!COV.mask[k] || COV.cells[k] >= kind) continue;
-    const x = -3.5 + (i + .5) * .1, z = -2.5 + (j + .5) * .1;
+    const x = RX0 + (i + .5) * .1, z = RZ0 + (j + .5) * .1;
     if ((x - p.x) ** 2 + (z - p.z) ** 2 > r * r) continue;
     if (kind === 1) COV.swept++; else { COV.mopped++; if (!COV.cells[k]) COV.swept++; }
     COV.cells[k] = kind; changed = true;
@@ -1813,12 +1819,13 @@ function v3Init() {
   const zm = (id, mat) => { (zoneMats[id] ||= []).push(mat); mat.userData.base = mat.emissive.getHex(); return mat; };
 
   // Floor: glossy 30 cm porcelain tiles with grout, plus the coverage layer just above it.
-  const FW = HQ ? 1400 : 700, FH = FW * 5 / 7, tilePx = FW / (7 / 0.3);
+  const RW = RX1 - RX0, RL = RZ1 - RZ0, RCX = (RX0 + RX1) / 2, RCZ = (RZ0 + RZ1) / 2;
+  const FW = HQ ? 640 : 320, FH = Math.round(FW * RL / RW), tilePx = FW / (RW / 0.3);
   const floorMap = tex(FW, FH, (g, w, h) => {
     g.fillStyle = "#b9b2a4"; g.fillRect(0, 0, w, h);
     for (let y = 0; y < h; y += tilePx) for (let x = 0; x < w; x += tilePx) {
-      const v = (HQ ? 196 : 214) + Math.floor(Math.random() * 10 - 5);
-      g.fillStyle = `rgb(${v},${v - 5},${v - 14})`; g.fillRect(x + 1.5, y + 1.5, tilePx - 3, tilePx - 3);
+      const v = (HQ ? 200 : 214) + Math.floor(Math.random() * 10 - 5);
+      g.fillStyle = `rgb(${v},${v - 4},${v - 10})`; g.fillRect(x + 1.5, y + 1.5, tilePx - 3, tilePx - 3);
       if (HQ) { g.fillStyle = "rgba(255,255,255,.05)"; g.fillRect(x + 2, y + 2, tilePx - 4, (tilePx - 4) / 2); }
     }
   });
@@ -1826,30 +1833,29 @@ function v3Init() {
     const t = tilePx / 2; g.fillStyle = "#fff"; g.fillRect(0, 0, w, h);
     for (let y = 0; y < h; y += t) for (let x = 0; x < w; x += t) { const v = 60 + Math.floor(Math.random() * 30); g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(x + 1, y + 1, t - 2, t - 2); }
   }, { linear: true }) : null;
-  const floor = add(new T.PlaneGeometry(7, 5), M(0xffffff, { map: floorMap, ...(HQ ? { roughnessMap: floorRough, roughness: 1, envMapIntensity: 0.8 } : {}) }), 0, 0, 0);
+  const floor = add(new T.PlaneGeometry(RW, RL), M(0xffffff, { map: floorMap, ...(HQ ? { roughnessMap: floorRough, roughness: 1, envMapIntensity: 0.8 } : {}) }), RCX, 0, RCZ);
   floor.rotation.x = -Math.PI / 2; floor.castShadow = false;
   COV.tex = new T.CanvasTexture(COV.canvas);
-  const covMesh = add(new T.PlaneGeometry(7, 5), new T.MeshBasicMaterial({ map: COV.tex, transparent: true, depthWrite: false, toneMapped: false }), 0, 0.006, 0);
+  const covMesh = add(new T.PlaneGeometry(RW, RL), new T.MeshBasicMaterial({ map: COV.tex, transparent: true, depthWrite: false, toneMapped: false }), RCX, 0.006, RCZ);
   covMesh.rotation.x = -Math.PI / 2; covMesh.castShadow = covMesh.receiveShadow = false;
   covReset();
-  const hall = add(new T.PlaneGeometry(2.6, 2.4), M(0x34373d, { roughness: 0.85 }), DOOR_X, -0.002, 3.75); hall.rotation.x = -Math.PI / 2; hall.castShadow = false;
+  const hall = add(new T.PlaneGeometry(2.8, 2.2), M(0x34373d, { roughness: 0.85 }), -0.6, -0.002, RZ1 + 1.15); hall.rotation.x = -Math.PI / 2; hall.castShadow = false;
   if (HQ) {
-    // Diorama base and a soft shadow under it.
-    box(7.3, 0.18, 5.3, M(0x1d1e22, { roughness: 0.55 }), 0, -0.091, 0, scene, 0.03);
+    box(RW + 0.3, 0.18, RL + 0.3, M(0x1d1e22, { roughness: 0.55 }), RCX, -0.091, RCZ, scene, 0.03);   // diorama base
     const shadowTex = tex(256, 256, (g, w, h) => {
       const gr = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
       gr.addColorStop(0, "rgba(0,0,0,.75)"); gr.addColorStop(0.6, "rgba(0,0,0,.35)"); gr.addColorStop(1, "rgba(0,0,0,0)");
       g.fillStyle = gr; g.fillRect(0, 0, w, h);
     });
-    const sh = new T.Mesh(new T.PlaneGeometry(13, 10), new T.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
-    sh.rotation.x = -Math.PI / 2; sh.position.set(0, -0.19, 0.4); scene.add(sh);
+    const sh = new T.Mesh(new T.PlaneGeometry(RW + 5, RL + 5), new T.MeshBasicMaterial({ map: shadowTex, transparent: true, depthWrite: false }));
+    sh.rotation.x = -Math.PI / 2; sh.position.set(RCX, -0.19, RCZ); scene.add(sh);
   }
 
-  // Walls: back and left full height, with a glossy subway-tile band below; right and front cut
-  // away low so the room stays visible.
+  // Walls: the fixture wall (right) and far wall full height, with a glossy subway-tile band; the
+  // plain left wall and entry wall cut away low so the room stays visible.
   const wallMat = M(0xebe7df, { roughness: 0.9 }), trimMat = M(0xd6d1c7, { roughness: 0.7 });
-  box(7.2, 2.4, 0.1, wallMat, 0, 1.2, -2.55, scene, 0.01);
-  box(0.1, 2.4, 5.2, wallMat, -3.55, 1.2, 0, scene, 0.01);
+  box(0.1, 2.4, RL + 0.2, wallMat, RX1 + 0.05, 1.2, RCZ, scene, 0.01);
+  box(RW + 0.2, 2.4, 0.1, wallMat, RCX, 1.2, RZ0 - 0.05, scene, 0.01);
   if (HQ) {
     const subway = (len) => tex(1024, Math.round(1024 * 1.2 / len), (g, w, h) => {
       const tw = w / (len / 0.15), th = h / (1.2 / 0.075);
@@ -1859,54 +1865,71 @@ function v3Init() {
       }
     });
     const tileMat = (len) => M(0xffffff, { map: subway(len), roughness: 0.22, envMapIntensity: 1 });
-    const back = add(new T.PlaneGeometry(7.1, 1.2), tileMat(7.1), 0, 0.6, -2.495); back.castShadow = false;
-    const left = add(new T.PlaneGeometry(5.1, 1.2), tileMat(5.1), -3.495, 0.6, 0); left.rotation.y = Math.PI / 2; left.castShadow = false;
-    box(7.1, 0.03, 0.03, M(0xb8bcc2, { metalness: 0.9, roughness: 0.25 }), 0, 1.215, -2.485);
-    const capL = box(5.1, 0.03, 0.03, M(0xb8bcc2, { metalness: 0.9, roughness: 0.25 }), -3.485, 1.215, 0); capL.rotation.y = Math.PI / 2;
+    const right = add(new T.PlaneGeometry(RL, 1.2), tileMat(RL), RX1 - 0.005, 0.6, RCZ); right.rotation.y = -Math.PI / 2; right.castShadow = false;
+    const backW = add(new T.PlaneGeometry(RW, 1.2), tileMat(RW), RCX, 0.6, RZ0 + 0.005); backW.castShadow = false;
+    const steel = M(0xb8bcc2, { metalness: 0.9, roughness: 0.25 });
+    box(0.03, 0.03, RL, steel, RX1 - 0.015, 1.215, RCZ);
+    box(RW, 0.03, 0.03, steel, RCX, 1.215, RZ0 + 0.015);
   }
-  box(0.1, 0.3, 5.2, trimMat, 3.55, 0.15, 0);
-  box(DOOR[0] + 3.6, 0.3, 0.1, trimMat, (DOOR[0] - 3.6) / 2, 0.15, 2.55);
-  box(3.6 - DOOR[1], 0.3, 0.1, trimMat, (DOOR[1] + 3.6) / 2, 0.15, 2.55);
+  box(0.1, 0.3, RL + 0.2, trimMat, RX0 - 0.05, 0.15, RCZ);
+  box(DOOR[0] - RX0 + 0.1, 0.3, 0.1, trimMat, (RX0 - 0.1 + DOOR[0]) / 2, 0.15, RZ1 + 0.05);
+  box(RX1 + 0.1 - DOOR[1], 0.3, 0.1, trimMat, (DOOR[1] + RX1 + 0.1) / 2, 0.15, RZ1 + 0.05);
+  // Wooden entry door, propped open into the hall.
   const doorMat = zm("Entrance", M(0x3d434c, { metalness: 0.6, roughness: 0.4 }));
-  box(0.08, 2.2, 0.14, doorMat, DOOR[0], 1.1, 2.55); box(0.08, 2.2, 0.14, doorMat, DOOR[1], 1.1, 2.55);
-  box(DOOR[1] - DOOR[0] + 0.08, 0.12, 0.14, doorMat, DOOR_X, 2.2, 2.55);
-  const mat = add(new T.PlaneGeometry(0.95, 0.7), zm("Entrance", M(0x2c3036, { roughness: 0.95 })), DOOR_X, 0.004, 2.1); mat.rotation.x = -Math.PI / 2; mat.castShadow = false;
+  box(0.08, 2.2, 0.14, doorMat, DOOR[0], 1.1, RZ1 + 0.05); box(0.08, 2.2, 0.14, doorMat, DOOR[1], 1.1, RZ1 + 0.05);
+  box(DOOR[1] - DOOR[0] + 0.08, 0.12, 0.14, doorMat, DOOR_X, 2.2, RZ1 + 0.05);
+  const entryHinge = new T.Group(); entryHinge.position.set(DOOR[0] + 0.04, 1.05, RZ1 + 0.12); entryHinge.rotation.y = -1.5; scene.add(entryHinge);
+  box(0.84, 2.08, 0.045, M(0xb98a52, { roughness: 0.55 }), 0.42, 0, 0, entryHinge, 0.01);
+  const mat = add(new T.PlaneGeometry(0.95, 0.7), zm("Entrance", M(0x2c3036, { roughness: 0.95 })), DOOR_X, 0.004, RZ1 - 0.4); mat.rotation.x = -Math.PI / 2; mat.castShadow = false;
 
-  // Vanity: wood cabinet, quartz top, porcelain basins, chrome faucets and a real mirror.
-  box(0.5, 0.78, 2.2, M(0x6e5a46, { roughness: 0.65 }), -3.25, 0.43, 0.9, scene, 0.015);
-  box(0.58, 0.05, 2.25, P(0x2c2c30, { roughness: 0.28, clearcoat: 0.6 }), -3.22, 0.845, 0.9, scene, 0.012);
+  // Vanity on the right wall: cabinet, granite top, 3 porcelain basins, chrome faucets, long mirror.
+  const VZ = 1.9, VL = 2.2;
+  box(0.5, 0.78, VL, M(0x6e5a46, { roughness: 0.65 }), RX1 - 0.25, 0.43, VZ, scene, 0.015);
+  box(0.58, 0.05, VL + 0.05, P(0x5d5d60, { roughness: 0.32, clearcoat: 0.6 }), RX1 - 0.27, 0.845, VZ, scene, 0.012);
   const sinkMat = zm("Sinks", P(0xf8f8f6)), chrome = M(0xe3e6ea, { metalness: 1, roughness: 0.1 });
-  for (const z of [0.25, 0.9, 1.55]) {
-    const basin = add(new T.CylinderGeometry(0.17, 0.12, 0.07, seg), sinkMat, -3.18, 0.895, z); basin.scale.z = 1.15;
-    if (HQ) { const well = add(new T.CircleGeometry(0.14, seg), M(0xd9dadb, { roughness: 0.2 }), -3.18, 0.931, z); well.rotation.x = -Math.PI / 2; well.scale.y = 1.15; }
-    add(new T.CylinderGeometry(0.018, 0.022, 0.2, 16), chrome, -3.42, 0.97, z);
-    box(0.17, 0.03, 0.03, chrome, -3.35, 1.065, z, scene, 0.012);
+  for (const z of [2.6, 1.9, 1.2]) {
+    const basin = add(new T.CylinderGeometry(0.17, 0.12, 0.07, seg), sinkMat, RX1 - 0.32, 0.895, z); basin.scale.x = 1.15;
+    if (HQ) { const well = add(new T.CircleGeometry(0.14, seg), M(0xd9dadb, { roughness: 0.2 }), RX1 - 0.32, 0.931, z); well.rotation.x = -Math.PI / 2; well.scale.x = 1.15; }
+    add(new T.CylinderGeometry(0.018, 0.022, 0.2, 16), chrome, RX1 - 0.08, 0.97, z);
+    box(0.17, 0.03, 0.03, chrome, RX1 - 0.15, 1.065, z, scene, 0.012);
   }
-  box(0.02, 0.95, 2.15, zm("Mirrors", HQ ? M(0xffffff, { metalness: 1, roughness: 0.03, envMapIntensity: 1.3 }) : M(0xaecbdc, { emissive: 0x14202a })), -3.485, 1.72, 0.9, scene, 0.005);
-  // Trash bin by the counter: brushed steel.
+  box(0.02, 0.95, VL - 0.05, zm("Mirrors", HQ ? M(0xffffff, { metalness: 1, roughness: 0.03, envMapIntensity: 1.3 }) : M(0xaecbdc, { emissive: 0x14202a })), RX1 - 0.015, 1.72, VZ, scene, 0.005);
+  // Small trash can in the corner by the vanity: brushed steel.
   const bin = zm("Trash", M(0x9aa0a8, { metalness: 0.85, roughness: 0.35 }));
-  add(new T.CylinderGeometry(0.2, 0.17, 0.65, seg), bin, -3.1, 0.325, 2.25);
-  add(new T.CylinderGeometry(0.21, 0.21, 0.04, seg), M(0x2e3236, { metalness: 0.6, roughness: 0.4 }), -3.1, 0.66, 2.25);
+  add(new T.CylinderGeometry(0.2, 0.17, 0.65, seg), bin, 1.3, 0.325, 3.5);
+  add(new T.CylinderGeometry(0.21, 0.21, 0.04, seg), M(0x2e3236, { metalness: 0.6, roughness: 0.4 }), 1.3, 0.66, 3.5);
 
-  // Porcelain urinals behind a privacy screen; three brushed-steel stalls with toilets.
+  // Two wall-hung urinals past the vanity, with privacy screens; two stalls across the far end.
   const fixture = zm("Toilets + urinals", P(0xf8f8f6)), partMat = M(0xb7bdc5, { metalness: 0.85, roughness: 0.33 });
-  for (const x of [-2.55, -1.9]) { box(0.38, 0.55, 0.3, fixture, x, 0.85, -2.35, scene, 0.08); box(0.26, 0.28, 0.06, M(0xe9ecee, { roughness: 0.2 }), x, 0.8, -2.19, scene, 0.025); }
-  box(0.04, 0.8, 0.5, partMat, -2.225, 1.0, -2.25);
-  for (const x of [-1.2, 0, 1.2, 2.4]) box(0.04, 1.75, 1.5, partMat, x, 1.075, -1.75);
-  for (const xc of [-0.6, 0.6, 1.8]) {
-    const bowl = add(new T.CylinderGeometry(0.19, 0.15, 0.4, seg), fixture, xc, 0.2, -2.05); bowl.scale.z = 1.25;
-    const seatG = new T.TorusGeometry(0.17, 0.035, HQ ? 16 : 8, seg);
-    const seatM = add(seatG, fixture, xc, 0.42, -2.05); seatM.rotation.x = Math.PI / 2; seatM.scale.y = 1.25;
-    box(0.42, 0.38, 0.18, fixture, xc, 0.62, -2.4, scene, 0.04);
-    const hinge = new T.Group(); hinge.position.set(xc - 0.55, 1.0, -1.0); hinge.rotation.y = 1.5; scene.add(hinge);   // swung in against the partition
-    box(0.6, 1.6, 0.03, partMat, 0.3, 0, 0, hinge);
+  for (const z of [0.1, -0.75]) {
+    box(0.3, 0.55, 0.38, fixture, RX1 - 0.15, 0.85, z, scene, 0.08);
+    box(0.06, 0.28, 0.26, M(0xe9ecee, { roughness: 0.2 }), RX1 - 0.31, 0.8, z, scene, 0.025);
+    add(new T.CylinderGeometry(0.03, 0.03, 0.3, 16), chrome, RX1 - 0.06, 1.25, z);   // flush valve
   }
+  for (const z of [0.5, -0.32, -1.18]) box(0.5, 0.8, 0.04, partMat, RX1 - 0.25, 1.0, z);
+  const SF = -2.0;                                                       // stall fronts
+  box(0.04, 1.75, SF - RZ0, partMat, 0, 1.075, (SF + RZ0) / 2);   // centre partition
+  box(0.45, 1.75, 0.04, partMat, (RX0 + -1.15) / 2, 1.075, SF);
+  box(0.7, 1.75, 0.04, partMat, 0, 1.075, SF);
+  box(0.45, 1.75, 0.04, partMat, (1.15 + RX1) / 2, 1.075, SF);
+  for (const hx of [-1.15, 1.15]) {                                      // doors swung in against the panel
+    const hinge = new T.Group(); hinge.position.set(hx, 1.0, SF); hinge.rotation.y = Math.PI / 2; scene.add(hinge);
+    box(0.7, 1.6, 0.03, partMat, 0.35, 0, 0, hinge);
+  }
+  for (const xc of [-0.75, 0.75]) {
+    const bowl = add(new T.CylinderGeometry(0.19, 0.15, 0.4, seg), fixture, xc, 0.2, -3.3); bowl.scale.z = 1.25;
+    const seatM = add(new T.TorusGeometry(0.17, 0.035, HQ ? 16 : 8, seg), fixture, xc, 0.42, -3.3); seatM.rotation.x = Math.PI / 2; seatM.scale.y = 1.25;
+    box(0.42, 0.38, 0.18, fixture, xc, 0.62, RZ0 + 0.1, scene, 0.04);
+  }
+  // Accessible stall (left): grab bars on the side and far walls.
+  const bar1 = add(new T.CylinderGeometry(0.02, 0.02, 0.9, 12), chrome, RX0 + 0.05, 0.85, -3.05); bar1.rotation.x = Math.PI / 2;
+  const bar2 = add(new T.CylinderGeometry(0.02, 0.02, 0.8, 12), chrome, -0.75, 0.85, RZ0 + 0.04); bar2.rotation.z = Math.PI / 2;
 
-  // Cleaning cart and wet floor sign.
+  // Cleaning cart (gray bin and caddy) and the yellow wet floor sign.
   const cart = new T.Group(); scene.add(cart);
   box(0.5, 0.06, 0.9, M(0x2e3238, { roughness: 0.45 }), 0, 0.28, 0, cart, 0.02);
   box(0.5, 0.6, 0.22, M(0x24272c, { roughness: 0.5 }), 0, 0.6, -0.34, cart, 0.03);
-  add(new T.CylinderGeometry(0.18, 0.15, 0.28, seg), P(0xf2c230, { roughness: 0.35, clearcoat: 0.4 }), 0, 0.45, 0.15, cart);
+  add(new T.CylinderGeometry(0.2, 0.18, 0.55, seg), M(0x6f7479, { roughness: 0.6 }), 0, 0.58, 0.15, cart);
   for (const [x, z] of [[-0.2, -0.38], [0.2, -0.38], [-0.2, 0.38], [0.2, 0.38]]) add(new T.CylinderGeometry(0.05, 0.05, 0.04, 16), M(0x15171a, { roughness: 0.8 }), x, 0.05, z, cart).rotation.z = Math.PI / 2;
   const sign = new T.Group(); sign.position.set(SIGN_POS[0], 0, SIGN_POS[1]); scene.add(sign);
   const yellow = P(0xffcc00, { roughness: 0.4, clearcoat: 0.5, emissive: HQ ? 0x000000 : 0x332600 });
@@ -1993,14 +2016,15 @@ function useFlat() {
   document.getElementById("v3Loading").hidden = true;
   v3Resize();
 }
-const LABEL_2D = { "Entrance": [DOOR_X, 2.75], "Floor": [0.6, 0.7], "Trash": [-2.45, 2.05], "Mirrors": [-2.45, 0.2], "Sinks": [-2.45, 1.0], "Toilets + urinals": [0.6, -1.7] };
+const LABEL_2D = { "Entrance": [DOOR_X, RZ1 + 0.3], "Floor": [-0.4, 0.4], "Trash": [0.85, 3.5], "Mirrors": [0.85, 2.45], "Sinks": [0.85, 1.55], "Toilets + urinals": [0.0, -2.9] };
 function v3Draw2D(t) {
   const g = V3.ctx2d, W = V3.w, H = V3.h;
   covUpdate(t);
-  // Fit the room and the hallway (x -3.6 to 3.9, z -2.6 to 4.7) between the side panels.
+  // Fit the room and the hall outside the door between the side panels.
   const left = Math.min(W * 0.31, 270), right = W - Math.min(W * 0.23, 250), top = 96, bottom = H - 66;
-  const s = Math.min((right - left) / 7.6, (bottom - top) / 7.3);
-  const ox = (left + right) / 2 - 0.15 * s, oz = (top + bottom) / 2 - 1.05 * s;
+  const spanX = RX1 - RX0 + 0.3, spanZ = RZ1 - RZ0 + 2.4;
+  const s = Math.min((right - left) / spanX, (bottom - top) / spanZ);
+  const ox = (left + right) / 2 - ((RX0 + RX1) / 2) * s, oz = (top + bottom) / 2 - ((RZ0 + RZ1 + 2.2) / 2) * s;
   const X = x => ox + x * s, Z = z => oz + z * s;
   const rect = (x0, z0, x1, z1, fill) => { g.fillStyle = fill; g.fillRect(X(x0), Z(z0), (x1 - x0) * s, (z1 - z0) * s); };
   const dot = (x, z, r, fill) => { g.fillStyle = fill; g.beginPath(); g.arc(X(x), Z(z), r * s, 0, Math.PI * 2); g.fill(); };
@@ -2008,34 +2032,34 @@ function v3Draw2D(t) {
   const live = id => ZONES.find(z => z.id === id).when.some(w => inWin(t, w));
   const HL = "rgba(155,48,255,.45)";
   g.clearRect(0, 0, W, H);
-  rect(1.4, 2.55, 3.95, 4.8, "#2a2d34");
-  rect(-3.5, -2.5, 3.5, 2.5, "#d8d3c6");
+  rect(-2.0, RZ1, 0.8, RZ1 + 2.2, "#2a2d34");
+  rect(RX0, RZ0, RX1, RZ1, "#d8d3c6");
   g.strokeStyle = "rgba(120,112,98,.35)"; g.lineWidth = 1; g.beginPath();
-  for (let x = -3; x < 3.5; x += 0.5) { g.moveTo(X(x), Z(-2.5)); g.lineTo(X(x), Z(2.5)); }
-  for (let z = -2; z < 2.5; z += 0.5) { g.moveTo(X(-3.5), Z(z)); g.lineTo(X(3.5), Z(z)); }
+  for (let x = RX0 + 0.3; x < RX1; x += 0.3) { g.moveTo(X(x), Z(RZ0)); g.lineTo(X(x), Z(RZ1)); }
+  for (let z = RZ0 + 0.3; z < RZ1; z += 0.3) { g.moveTo(X(RX0), Z(z)); g.lineTo(X(RX1), Z(z)); }
   g.stroke();
   g.imageSmoothingEnabled = true;
-  g.drawImage(COV.canvas, X(-3.5), Z(-2.5), 7 * s, 5 * s);
+  g.drawImage(COV.canvas, X(RX0), Z(RZ0), (RX1 - RX0) * s, (RZ1 - RZ0) * s);
   // Fixtures (purple while being worked).
-  rect(-3.5, -0.2, -2.92, 2.0, "#8d8577");
-  for (const z of [0.25, 0.9, 1.55]) dot(-3.18, z, 0.17, live("Sinks") ? "#c58bff" : "#f6f6f3");
-  line([[-3.46, -0.15], [-3.46, 1.95]], live("Mirrors") ? "#9b30ff" : "#aecbdc", 0.09);
-  dot(-3.1, 2.25, 0.2, live("Trash") ? "#9b30ff" : "#5b6068");
+  rect(RX1 - 0.58, 0.8, RX1, 3.0, "#8d8577");
+  for (const z of [2.6, 1.9, 1.2]) dot(RX1 - 0.32, z, 0.17, live("Sinks") ? "#c58bff" : "#f6f6f3");
+  line([[RX1 - 0.04, 0.85], [RX1 - 0.04, 2.95]], live("Mirrors") ? "#9b30ff" : "#aecbdc", 0.09);
+  dot(1.3, 3.5, 0.2, live("Trash") ? "#9b30ff" : "#5b6068");
   const fix = live("Toilets + urinals") ? "#c58bff" : "#f7f7f4";
-  if (live("Toilets + urinals")) rect(-3.3, -2.5, 2.4, -1.0, HL);
-  for (const x of [-2.55, -1.9]) rect(x - 0.19, -2.5, x + 0.19, -2.2, fix);
-  for (const xc of [-0.6, 0.6, 1.8]) { rect(xc - 0.21, -2.5, xc + 0.21, -2.32, fix); g.fillStyle = fix; g.beginPath(); g.ellipse(X(xc), Z(-2.05), 0.19 * s, 0.25 * s, 0, 0, Math.PI * 2); g.fill(); }
-  for (const x of [-1.2, 0, 1.2, 2.4]) line([[x, -2.5], [x, -1.0]], "#6c7a8c", 0.05);
-  line([[-2.225, -2.5], [-2.225, -2.0]], "#6c7a8c", 0.04);
-  if (live("Entrance")) rect(DOOR[0], 1.9, DOOR[1], 2.55, HL);
-  // Walls, with the door gap at the front right.
+  if (live("Toilets + urinals")) { rect(-1.6, RZ0, 1.6, -2.0, HL); rect(1.0, -1.25, RX1, 0.55, HL); }
+  for (const z of [0.1, -0.75]) rect(RX1 - 0.3, z - 0.19, RX1, z + 0.19, fix);
+  for (const z of [0.5, -0.32, -1.18]) line([[RX1 - 0.5, z], [RX1, z]], "#6c7a8c", 0.04);
+  for (const xc of [-0.75, 0.75]) { rect(xc - 0.21, RZ0, xc + 0.21, RZ0 + 0.18, fix); g.fillStyle = fix; g.beginPath(); g.ellipse(X(xc), Z(-3.3), 0.19 * s, 0.25 * s, 0, 0, Math.PI * 2); g.fill(); }
+  line([[0, RZ0], [0, -2.0]], "#6c7a8c", 0.05);
+  line([[RX0, -2.0], [-1.15, -2.0]], "#6c7a8c", 0.05); line([[-0.35, -2.0], [0.35, -2.0]], "#6c7a8c", 0.05); line([[1.15, -2.0], [RX1, -2.0]], "#6c7a8c", 0.05);
+  if (live("Entrance")) rect(DOOR[0], RZ1 - 0.6, DOOR[1], RZ1, HL);
+  // Walls, with the door gap in the entry wall.
   const wall = "#9a958b";
-  line([[-3.55, 2.55], [-3.55, -2.55], [3.55, -2.55], [3.55, 2.55], [DOOR[1], 2.55]], wall, 0.1);
-  line([[DOOR[0], 2.55], [-3.55, 2.55]], wall, 0.1);
+  line([[DOOR[0], RZ1 + 0.05], [RX0 - 0.05, RZ1 + 0.05], [RX0 - 0.05, RZ0 - 0.05], [RX1 + 0.05, RZ0 - 0.05], [RX1 + 0.05, RZ1 + 0.05], [DOOR[1], RZ1 + 0.05]], wall, 0.1);
   // Cart and wet floor sign.
   const cp = cartAt(t), cz = cp.z;
-  rect(cp.x - 0.25, cz - 0.45, cp.x + 0.25, cz + 0.45, "#4a4f57"); dot(cp.x, cz + 0.15, 0.17, "#f2c230");
-  if (t >= SIGN_AT) { g.fillStyle = "#ffcc00"; g.beginPath(); const [sx, sz] = SIGN_POS; g.moveTo(X(sx), Z(sz - 0.2)); g.lineTo(X(sx + 0.22), Z(sz + 0.2)); g.lineTo(X(sx - 0.22), Z(sz + 0.2)); g.closePath(); g.fill(); }
+  rect(cp.x - 0.25, cz - 0.45, cp.x + 0.25, cz + 0.45, "#4a4f57"); dot(cp.x, cz + 0.15, 0.18, "#6f7479");
+  if (t >= SIGN_AT) { const [sx, sz] = SIGN_POS; g.fillStyle = "#ffcc00"; g.beginPath(); g.moveTo(X(sx), Z(sz - 0.2)); g.lineTo(X(sx + 0.22), Z(sz + 0.2)); g.lineTo(X(sx - 0.22), Z(sz + 0.2)); g.closePath(); g.fill(); }
   // Trail (last 30 s), then the avatar with a pointer for its facing.
   const trail = []; for (let n = 0; n < 61; n++) { const q = posAt(Math.max(0, t - 30 + n * 0.5)); trail.push([q.x, q.z]); }
   g.globalAlpha = 0.8; line(trail, "#c58bff", 0.05); g.globalAlpha = 1;
@@ -2114,7 +2138,9 @@ function v3Draw(t) {
     V3.toolHandle.scale.y = dist + 0.3; V3.toolHandle.position.y = (0.3 - dist) / 2;   // grip 30 cm from the top
     V3.toolHead.position.y = -dist;
   }
-  V3.toolHead.material.color.setHex(inWin(t, MOP_T) ? 0x9fd8e6 : 0x444a52);
+  const mopping = inWin(t, MOP_T);   // as in the video: red broom with black bristles, blue string mop
+  V3.toolHead.material.color.setHex(mopping ? 0x2f5bd3 : 0x161616);
+  V3.toolHandle.material.color.setHex(mopping ? 0x9aa0a8 : 0xc0262d);
   av.visible = cam.mode !== "eyes";
   // Cart: outside until the cleaner enters, then parked inside to the right of the door.
   const cp = cartAt(t);
