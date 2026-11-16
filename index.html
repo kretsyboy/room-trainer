@@ -1941,47 +1941,62 @@ async function loadAvatarModel() {
 function swapAvatar(d, purple, deep, HQ) {
   const T = V3.T, av = V3.av, S = 1.75 / 2.75, Y0 = 1.7066;
   // Raw model: head at -y, feet at +y, face toward -z. Upright: y' = (Y0 - y) * S, z' = -z * S.
-  const SH = [0.47, 0.05], HIP = [0.2, 1.0];           // shoulder (|x|, y) and hip (|x|, y), raw units
-  const parts = { body: [], armL: [], armR: [], handL: [], handR: [], legL: [], legR: [] };
+  // One continuous skinned mesh: each vertex blends smoothly between the body and an arm or leg
+  // bone near the joint, so shoulders and hips bend cleanly instead of tearing.
+  const SH = [0.47, 0.05], HIP = [0.2, 1.0];          // shoulder (|x|, y) and hip (|x|, y), raw units
+  const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const n = d.pos.length / 3;
+  const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3);
+  const skinIndex = new Uint16Array(n * 4), skinWeight = new Float32Array(n * 4);
+  // Bones: 0 body, 1 left arm, 2 right arm, 3 left leg, 4 right leg.
+  for (let v = 0; v < n; v++) {
+    const rx = d.pos[v * 3], ry = d.pos[v * 3 + 1], rz = d.pos[v * 3 + 2];
+    pos[v * 3] = rx * S; pos[v * 3 + 1] = (Y0 - ry) * S; pos[v * 3 + 2] = -rz * S;
+    nrm[v * 3] = d.nrm[v * 3]; nrm[v * 3 + 1] = -d.nrm[v * 3 + 1]; nrm[v * 3 + 2] = -d.nrm[v * 3 + 2];
+    const band = ss(-0.4, -0.2, ry) * (1 - ss(0.3, 0.5, ry));        // shoulder height only
+    const arm = ss(0.42, 0.7, Math.abs(rx)) * band;
+    const leg = ss(0.85, 1.15, ry) * (1 - arm);
+    const legL = leg * (1 - ss(-0.06, 0.06, rx)), legR = leg - legL;
+    const w = [1 - arm - leg, rx < 0 ? arm : 0, rx < 0 ? 0 : arm, legL, legR];
+    // Keep the 4 strongest influences.
+    const order = [0, 1, 2, 3, 4].sort((i, j) => w[j] - w[i]).slice(0, 4);
+    let sum = 0; order.forEach(i => sum += w[i]);
+    order.forEach((i, k) => { skinIndex[v * 4 + k] = i; skinWeight[v * 4 + k] = w[i] / (sum || 1); });
+  }
+  // Colours by face: hands skin/glove, legs deep purple, the rest SiteVue purple.
+  const groups = [[], [], []];                                          // purple, deep, hands
   for (let i = 0; i < d.idx.length; i += 3) {
     let cx = 0, cy = 0;
     for (let k = 0; k < 3; k++) { cx += d.pos[d.idx[i + k] * 3]; cy += d.pos[d.idx[i + k] * 3 + 1]; }
     cx /= 3; cy /= 3;
-    const side = cx < 0 ? "L" : "R";
-    let part = "body";
-    if (Math.abs(cx) > SH[0] + 0.05 && cy > -0.25 && cy < 0.35) part = (Math.abs(cx) > 1.35 ? "hand" : "arm") + side;
-    else if (cy > HIP[1]) part = "leg" + side;
-    parts[part].push(i);
+    const g = Math.abs(cx) > 1.35 && cy > -0.3 && cy < 0.4 ? 2 : cy > HIP[1] ? 1 : 0;
+    groups[g].push(d.idx[i], d.idx[i + 1], d.idx[i + 2]);
   }
-  const pivotOf = name => name.startsWith("arm") || name.startsWith("hand")
-    ? [(name.endsWith("L") ? -SH[0] : SH[0]) * S, (Y0 - SH[1]) * S, 0]
-    : name.startsWith("leg") ? [(name.endsWith("L") ? -HIP[0] : HIP[0]) * S, (Y0 - HIP[1]) * S, 0] : [0, 0, 0];
-  const geo = name => {
-    const tris = parts[name], pos = new Float32Array(tris.length * 9), nrm = new Float32Array(tris.length * 9), pv = pivotOf(name);
-    let o = 0;
-    for (const i of tris) for (let k = 0; k < 3; k++, o += 3) {
-      const v = d.idx[i + k] * 3;
-      pos[o] = d.pos[v] * S - pv[0]; pos[o + 1] = (Y0 - d.pos[v + 1]) * S - pv[1]; pos[o + 2] = -d.pos[v + 2] * S - pv[2];
-      nrm[o] = d.nrm[v]; nrm[o + 1] = -d.nrm[v + 1]; nrm[o + 2] = -d.nrm[v + 2];
-    }
-    const g = new T.BufferGeometry();
-    g.setAttribute("position", new T.BufferAttribute(pos, 3)); g.setAttribute("normal", new T.BufferAttribute(nrm, 3));
-    return g;
-  };
-  const mesh = (g, m, parent) => { const x = new T.Mesh(g, m); if (HQ) x.castShadow = x.receiveShadow = true; parent.add(x); return x; };
+  const geo = new T.BufferGeometry();
+  geo.setAttribute("position", new T.BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new T.BufferAttribute(nrm, 3));
+  geo.setAttribute("skinIndex", new T.Uint16BufferAttribute(skinIndex, 4));
+  geo.setAttribute("skinWeight", new T.Float32BufferAttribute(skinWeight, 4));
+  const index = [...groups[0], ...groups[1], ...groups[2]];
+  geo.setIndex(index);
+  geo.addGroup(0, groups[0].length, 0); geo.addGroup(groups[0].length, groups[1].length, 1); geo.addGroup(groups[0].length + groups[1].length, groups[2].length, 2);
+  const mats = [purple, deep, V3.handMat];
+  mats.forEach(m => { m.skinning = true; m.needsUpdate = true; });
   // Remove the old figure (keep the floor ring, pointer and broom).
   for (const c of [...av.children]) if (c.isGroup && c !== V3.tool || (c.isMesh && !c.material.isMeshBasicMaterial)) av.remove(c);
-  mesh(geo("body"), purple, av);
-  const limb = (name, mat, hand) => {
-    const g = new T.Group(); g.position.set(...pivotOf(name)); av.add(g);
-    mesh(geo(name), mat, g); if (hand) mesh(geo(hand), V3.handMat, g);
-    return g;
-  };
-  const armL = limb("armL", purple, "handL"), armR = limb("armR", purple, "handR");
-  const legL = limb("legL", deep), legR = limb("legR", deep);
-  // Arms hang at the sides (rotation.z), and the animations swing them on rotation.x.
-  armL.rotation.z = 1.3; armR.rotation.z = -1.3;
-  Object.assign(V3, { armL, armR, legL, legR, dirty: true });
+  const root = new T.Bone();
+  const bone = (x, y) => { const b = new T.Bone(); b.position.set(x, y, 0); root.add(b); return b; };
+  const armL = bone(-SH[0] * S, (Y0 - SH[1]) * S), armR = bone(SH[0] * S, (Y0 - SH[1]) * S);
+  const legL = bone(-HIP[0] * S, (Y0 - HIP[1]) * S), legR = bone(HIP[0] * S, (Y0 - HIP[1]) * S);
+  const mesh = new T.SkinnedMesh(geo, mats);
+  mesh.add(root); av.add(mesh);
+  mesh.updateMatrixWorld(true);
+  mesh.bind(new T.Skeleton([root, armL, armR, legL, legR]));
+  mesh.frustumCulled = false;
+  if (HQ) mesh.castShadow = mesh.receiveShadow = true;
+  // Arms hang at the sides (rotation.z); the animations swing them on rotation.x.
+  armL.rotation.z = 1.25; armR.rotation.z = -1.25;
+  Object.assign(V3, { armL, armR, legL, legR, avatarMesh: mesh, dirty: true });
 }
 
 function v3Resize() {
