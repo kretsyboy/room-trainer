@@ -2033,15 +2033,15 @@ function v3Init() {
   box(0.5, 0.06, 0.9, M(0x2e3238, { roughness: 0.45 }), 0, 0.28, 0, cart, 0.02);
   box(0.5, 0.6, 0.22, M(0x24272c, { roughness: 0.5 }), 0, 0.6, -0.34, cart, 0.03);
   const simpleBin = add(new T.CylinderGeometry(0.2, 0.18, 0.55, seg), M(0x6f7479, { roughness: 0.6 }), 0, 0.58, 0.15, cart);
-  // The cart's bin: models/bin.glb (from trash_bin_upload.blend), lid removed, black bag inside.
+  // The cart's bin: models/bin.glb (from trash_bin_upload.blend): bin, lid, and the black bag's cuff under the lid.
+  // Glossy black bag; drawn slightly in front of the bin's rim so the two never flicker.
+  const bagMat = P(0x101012, { roughness: 0.35, clearcoat: 0.3, side: T.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   if (HQ) loadModel("models/bin.glb").then(gltf => {
     simpleBin.visible = false;
     gltf.scene.traverse(o => {
       if (!o.isMesh) return;
       o.castShadow = o.receiveShadow = true;
-      o.material = /metal/i.test(o.material.name)
-        ? M(0x6f7479, { roughness: 0.6 })                                   // grey plastic, as in the video
-        : P(0x101012, { roughness: 0.35, clearcoat: 0.3 });                 // black garbage bag
+      o.material = /metal/i.test(o.material.name) ? M(0x6f7479, { roughness: 0.6 }) : bagMat;   // grey plastic bin, black bag
     });
     const b = gltf.scene, S = 0.5 / 0.794;            // 0.5 m across to fit the cart
     b.scale.setScalar(S);
@@ -2060,7 +2060,7 @@ function v3Init() {
   // Filmic tone mapping washes out bright saturated purple, so HQ uses a deeper base with a soft sheen.
   const purple = HQ ? P(0x6a12d8, { roughness: 0.5, clearcoat: 0.2, clearcoatRoughness: 0.3, envMapIntensity: 0.5, emissive: 0x1c0440 }) : M(0x9b30ff, { emissive: 0x2a0850 });
   const deep = M(HQ ? 0x1e0b3d : 0x2b1550, { roughness: 0.6 }), skin = M(0xd9a77f), glove = M(0x2d8cff);
-  const handMat = HQ ? P(0x1f6bff, { roughness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.2 }) : M(0x2d8cff);   // blue nitrile gloves
+  const handMat = purple;   // hands the same purple as the body
   const av = new T.Group(); scene.add(av);
   const capsule = (r, len) => {                       // a pill shape standing on y, centred at 0
     const pts = [], h = len / 2 - r, n = HQ ? 10 : 6;
@@ -2085,7 +2085,6 @@ function v3Init() {
   const limb = (x, y, r, len, mat) => { const g = new T.Group(); g.position.set(x, y, 0); av.add(g); add(capsule(r, len), mat, 0, -len / 2 + r, 0, g); return g; };
   // Shoulder joints sit inside the torso's rounded shoulders, so the arms grow out of the body.
   const armL = limb(-0.215, 1.29, 0.075, 0.74, purple), armR = limb(0.215, 1.29, 0.075, 0.74, purple);
-  for (const arm of [armL, armR]) add(capsule(0.08, 0.18), handMat, 0, -0.575, 0, arm);   // glove over the hand
   const legL = limb(-0.112, HIPY + 0.09, 0.09, HIPY + 0.18, purple), legR = limb(0.112, HIPY + 0.09, 0.09, HIPY + 0.18, purple);   // one purple all over   // feet on the floor
   // Broom / mop held in front while sweeping and mopping.
   // Broom / mop: held in the right hand. Each frame it's placed with the handle through the right
