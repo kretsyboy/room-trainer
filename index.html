@@ -400,7 +400,9 @@
   .v3-chip.ok b { color: #30D158; }
   .v3-panel { background: var(--v3panel); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 9px 10px; }
   .v3-h { font: var(--t-caps); letter-spacing: .08em; color: #9EA3A8; margin-bottom: 7px; }
-  .v3-steps { position: absolute; left: 12px; top: calc(var(--pad) + 86px); width: clamp(168px, 22vw, 250px); max-height: calc(100% - var(--pad) - 160px); overflow: hidden; }
+  /* SOP checklist sits low, just above the playback bar, clear of the stats chips (--v3-below is the
+     bottom of the stats row, measured in v3Ui). */
+  .v3-steps { position: absolute; left: 12px; bottom: calc(max(10px, env(safe-area-inset-bottom, 0px)) + 66px); width: clamp(168px, 22vw, 250px); max-height: calc(100% - var(--v3-below, 120px) - max(10px, env(safe-area-inset-bottom, 0px)) - 78px); overflow: hidden; }
   #v3Steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
   #v3Steps button {
     width: 100%; height: auto !important; display: flex; align-items: center; gap: 7px; text-align: left;
@@ -2096,6 +2098,8 @@ function v3Ui(t) {
     `<span class="v3-chip"><b>${sw}%</b> swept</span>` +
     `<span class="v3-chip"><b>${mo}%</b> mopped</span>` +
     `<span class="v3-chip${gloves ? " ok" : ""}">Gloves <b>${gloves ? "on" : "checking"}</b></span>`;
+  const statsBottom = document.getElementById("v3Stats").getBoundingClientRect().bottom - v3El.getBoundingClientRect().top;
+  if (statsBottom > 0) v3El.style.setProperty("--v3-below", Math.round(statsBottom) + "px");
   document.querySelectorAll("#v3Steps li").forEach((li, i) => {
     const st = SOP[i], active = t >= st.start && t < endOf(st);
     li.classList.toggle("done", done[i]); li.classList.toggle("active", active);
