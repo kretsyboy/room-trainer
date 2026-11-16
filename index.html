@@ -1682,13 +1682,15 @@ const V3 = { ready: false, raf: 0, lastFrame: 0, lastT: -1, uiQ: -1, uiDirty: tr
 let threeLoading = null;
 // The detailed toilet model needs three.js's glTF loader (same version as three.js, r128).
 let gltfLoading = null;
-const loadToiletModel = () => (gltfLoading ||= new Promise((res, rej) => {
+const loadGLTFLoader = () => (gltfLoading ||= new Promise((res, rej) => {
   if (window.THREE.GLTFLoader) return res();
   const s = document.createElement("script");
   s.src = "https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js";
   s.onload = () => res(); s.onerror = () => { gltfLoading = null; s.remove(); rej(new Error("GLTFLoader failed to load")); };
   document.head.appendChild(s);
-})).then(() => new Promise((res, rej) => new THREE.GLTFLoader().load("models/toilet.glb", res, undefined, rej)));
+}));
+const loadModel = url => loadGLTFLoader().then(() => new Promise((res, rej) => new THREE.GLTFLoader().load(url, res, undefined, rej)));
+const loadToiletModel = () => loadModel("models/toilet.glb");
 const FORCE_FLAT = /[?&]flat\b/.test(location.search);
 const loadThree = () => threeLoading ||= new Promise((res, rej) => {
   if (window.THREE) return res();
@@ -1898,15 +1900,52 @@ function v3Init() {
 
   // Vanity on the right wall: cabinet, granite top, 3 porcelain basins, chrome faucets, long mirror.
   const VZ = 1.9, VL = 2.2;
-  box(0.5, 0.78, VL, M(0x6e5a46, { roughness: 0.65 }), RX1 - 0.25, 0.43, VZ, scene, 0.015);
-  box(0.58, 0.05, VL + 0.05, P(0x5d5d60, { roughness: 0.32, clearcoat: 0.6 }), RX1 - 0.27, 0.845, VZ, scene, 0.012);
+  const woodMat = M(0x6e5a46, { roughness: 0.65 }), graniteMat = P(0x5d5d60, { roughness: 0.32, clearcoat: 0.6 });
+  const cabinet = box(0.5, 0.78, VL, woodMat, RX1 - 0.25, 0.43, VZ, scene, 0.015);
+  const solidTop = box(0.58, 0.05, VL + 0.05, graniteMat, RX1 - 0.27, 0.845, VZ, scene, 0.012);
   const sinkMat = zm("Sinks", P(0xf8f8f6)), chrome = M(0xe3e6ea, { metalness: 1, roughness: 0.1 });
-  for (const z of [2.6, 1.9, 1.2]) {
+  const SINK_Z = [2.6, 1.9, 1.2], simpleSinks = [];
+  for (const z of SINK_Z) {
     const basin = add(new T.CylinderGeometry(0.17, 0.12, 0.07, seg), sinkMat, RX1 - 0.32, 0.895, z); basin.scale.x = 1.15;
-    if (HQ) { const well = add(new T.CircleGeometry(0.14, seg), M(0xd9dadb, { roughness: 0.2 }), RX1 - 0.32, 0.931, z); well.rotation.x = -Math.PI / 2; well.scale.x = 1.15; }
-    add(new T.CylinderGeometry(0.018, 0.022, 0.2, 16), chrome, RX1 - 0.08, 0.97, z);
-    box(0.17, 0.03, 0.03, chrome, RX1 - 0.15, 1.065, z, scene, 0.012);
+    simpleSinks.push(basin);
+    if (HQ) { const well = add(new T.CircleGeometry(0.14, seg), M(0xd9dadb, { roughness: 0.2 }), RX1 - 0.32, 0.931, z); well.rotation.x = -Math.PI / 2; well.scale.x = 1.15; simpleSinks.push(well); }
+    simpleSinks.push(add(new T.CylinderGeometry(0.018, 0.022, 0.2, 16), chrome, RX1 - 0.08, 0.97, z), box(0.17, 0.03, 0.03, chrome, RX1 - 0.15, 1.065, z, scene, 0.012));
   }
+  // Detailed drop-in basins with mixer taps (models/sink.glb, from the .blend). The bowl sits down in
+  // the counter, so the top gets cut-outs and the cabinet top drops below the bowls.
+  if (HQ) loadModel("models/sink.glb").then(gltf => {
+    const TOP_Y = 0.87, CX = RX1 - 0.3;
+    const shape = new T.Shape();
+    shape.moveTo(-0.29, -VL / 2 - 0.025); shape.lineTo(0.29, -VL / 2 - 0.025); shape.lineTo(0.29, VL / 2 + 0.025); shape.lineTo(-0.29, VL / 2 + 0.025); shape.closePath();
+    for (const z of SINK_Z) {                       // rounded-rectangle holes, a little inside the basin rim
+      const h = new T.Path(), hx = 0.17, hz = 0.26, r = 0.08, oz = z - VZ, ox = CX - (RX1 - 0.27);
+      h.moveTo(ox - hx + r, oz - hz); h.lineTo(ox + hx - r, oz - hz); h.quadraticCurveTo(ox + hx, oz - hz, ox + hx, oz - hz + r);
+      h.lineTo(ox + hx, oz + hz - r); h.quadraticCurveTo(ox + hx, oz + hz, ox + hx - r, oz + hz); h.lineTo(ox - hx + r, oz + hz);
+      h.quadraticCurveTo(ox - hx, oz + hz, ox - hx, oz + hz - r); h.lineTo(ox - hx, oz - hz + r); h.quadraticCurveTo(ox - hx, oz - hz, ox - hx + r, oz - hz);
+      shape.holes.push(h);
+    }
+    const topGeo = new T.ExtrudeGeometry(shape, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.005, bevelSize: 0.005, bevelSegments: 2, curveSegments: 16 });
+    topGeo.rotateX(Math.PI / 2);                    // lay flat: shape x→x, shape y→z, depth downward
+    const top = add(topGeo, graniteMat, RX1 - 0.27, TOP_Y, VZ);
+    solidTop.visible = false;
+    cabinet.visible = false;
+    box(0.5, 0.62, VL, woodMat, RX1 - 0.25, 0.35, VZ, scene, 0.015);                 // lower cabinet
+    box(0.03, 0.17, VL, woodMat, RX1 - 0.515, 0.745, VZ, scene, 0.006);             // front apron
+    simpleSinks.forEach(m => m.visible = false);
+    gltf.scene.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = o.receiveShadow = true;
+      if (/ceramic/i.test(o.material.name)) o.material = sinkMat;                  // glazed porcelain, glows when worked
+      else o.material = chrome;
+    });
+    for (const z of SINK_Z) {
+      const sk = gltf.scene.clone(true);
+      sk.rotation.y = -Math.PI / 2;                 // mixer toward the wall
+      sk.position.set(CX, TOP_Y - 0.114, z);        // rim just above the counter top
+      scene.add(sk);
+    }
+    V3.dirty = true;
+  }).catch(e => console.warn("3D View: sink model not loaded, keeping the simple sinks", e));
   box(0.02, 0.95, VL - 0.05, zm("Mirrors", HQ ? M(0xffffff, { metalness: 1, roughness: 0.03, envMapIntensity: 1.3 }) : M(0xaecbdc, { emissive: 0x14202a })), RX1 - 0.015, 1.72, VZ, scene, 0.005);
   // Small trash can in the corner by the vanity: brushed steel.
   const bin = zm("Trash", M(0x9aa0a8, { metalness: 0.85, roughness: 0.35 }));
@@ -1915,11 +1954,31 @@ function v3Init() {
 
   // Two wall-hung urinals past the vanity, with privacy screens; two stalls across the far end.
   const fixture = zm("Toilets + urinals", P(0xf8f8f6)), partMat = M(0xb7bdc5, { metalness: 0.85, roughness: 0.33 });
-  for (const z of [0.1, -0.75]) {
-    box(0.3, 0.55, 0.38, fixture, RX1 - 0.15, 0.85, z, scene, 0.08);
-    box(0.06, 0.28, 0.26, M(0xe9ecee, { roughness: 0.2 }), RX1 - 0.31, 0.8, z, scene, 0.025);
-    add(new T.CylinderGeometry(0.03, 0.03, 0.3, 16), chrome, RX1 - 0.06, 1.25, z);   // flush valve
+  const URINAL_Z = [0.1, -0.75], simpleUrinals = [];
+  for (const z of URINAL_Z) {
+    simpleUrinals.push(box(0.3, 0.55, 0.38, fixture, RX1 - 0.15, 0.85, z, scene, 0.08),
+      box(0.06, 0.28, 0.26, M(0xe9ecee, { roughness: 0.2 }), RX1 - 0.31, 0.8, z, scene, 0.025),
+      add(new T.CylinderGeometry(0.03, 0.03, 0.3, 16), chrome, RX1 - 0.06, 1.25, z));   // flush valve
   }
+  // Detailed wall-hung urinals with flush valves (models/urinal.glb, from Urinal.blend), scaled to a
+  // 0.6 m tall bowl with the lip at standard height.
+  if (HQ) loadModel("models/urinal.glb").then(gltf => {
+    simpleUrinals.forEach(m => m.visible = false);
+    gltf.scene.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = o.receiveShadow = true;
+      o.material = /metal/i.test(o.material.name) ? chrome : fixture;
+    });
+    const US = 0.6 / (3.557 * 0.92);               // model's bowl is 3.56 units tall (node scale 0.92)
+    for (const z of URINAL_Z) {
+      const u = gltf.scene.clone(true);
+      u.scale.setScalar(US);
+      u.rotation.y = -Math.PI / 2;                  // back to the wall
+      u.position.set(RX1 - 1.03 * 0.92 * US - 0.005, 0.35 + 0.92 * US, z);
+      scene.add(u);
+    }
+    V3.dirty = true;
+  }).catch(e => console.warn("3D View: urinal model not loaded, keeping the simple urinals", e));
   for (const z of [0.5, -0.32, -1.18]) box(0.5, 0.8, 0.04, partMat, RX1 - 0.25, 1.0, z);
   const SF = -2.0;                                                       // stall fronts
   box(0.04, 1.75, SF - RZ0, partMat, 0, 1.075, (SF + RZ0) / 2);   // centre partition
@@ -1947,6 +2006,7 @@ function v3Init() {
     });
     for (const xc of [-0.75, 0.75]) {
       const t = gltf.scene.clone(true);
+      t.scale.setScalar(1.15);                      // a bit larger than the model's own size
       t.position.set(xc, 0, RZ0 + 0.02);           // tank against the back wall, bowl facing the stall door
       scene.add(t);
     }
