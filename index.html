@@ -456,7 +456,6 @@
   /* Locked rooms (no training content yet): dimmed and not clickable. */
   #wheel .wedge.locked { opacity: .4; }
   #wheel .wedge.locked .outline { cursor: default; }
-  .v3-credit { margin: 0; font: 500 10px/1.3 var(--body); color: #8E9399; }
   /* SOP header row: the timer and labels never shrink; the subtitle and Gloves chip give way first,
      so the timer always stays inside the panel. */
   #sop .hud-row { gap: 6px; min-width: 0; }
@@ -627,7 +626,6 @@
   <aside class="v3-side">
     <div class="v3-video" id="v3VideoBox"><video id="v3Video" playsinline muted preload="metadata" disablepictureinpicture disableremoteplayback poster="video/poster/s1.jpg"></video><span class="live">LIVE</span></div>
     <div class="v3-panel v3-feed"><div class="v3-h">EVENT FEED</div><ul id="v3Feed"></ul></div>
-    <p class="v3-credit">Character: “Human Fall Flat” by YourBoy (Sketchfab), CC BY 4.0</p>
   </aside>
   <p class="v3-hint">Drag to orbit · Scroll to zoom</p>
   <footer class="v3-bar">
@@ -1915,20 +1913,37 @@ function v3Init() {
   box(0.32, 0.62, 0.02, yellow, 0, 0.3, 0.08, sign, 0.008).rotation.x = -0.25;
   box(0.32, 0.62, 0.02, yellow, 0, 0.3, -0.08, sign, 0.008).rotation.x = 0.25;
 
-  // Avatar: SiteVue purple with a glossy finish and a dark glass visor showing its facing.
+  // Avatar: the restroom-sign figure in 3D. Round head floating above rounded shoulders, arms hanging
+  // at the sides with a thin gap, two legs with a gap; every end fully rounded. 1.75 m tall.
   // Filmic tone mapping washes out bright saturated purple, so HQ uses a deeper base with a soft sheen.
   const purple = HQ ? P(0x6a12d8, { roughness: 0.5, clearcoat: 0.2, clearcoatRoughness: 0.3, envMapIntensity: 0.5, emissive: 0x1c0440 }) : M(0x9b30ff, { emissive: 0x2a0850 });
   const deep = M(HQ ? 0x1e0b3d : 0x2b1550, { roughness: 0.6 }), skin = M(0xd9a77f), glove = M(0x2d8cff);
-  const av = new T.Group(); scene.add(av);
-  const limb = (r, h, mat, x, y) => { const g = new T.Group(); g.position.set(x, y, 0); av.add(g); add(new T.CylinderGeometry(r, r, h, HQ ? 20 : 10), mat, 0, -h / 2, 0, g); return g; };
-  const legL = limb(0.075, 0.72, deep, -0.1, 0.74), legR = limb(0.075, 0.72, deep, 0.1, 0.74);
-  add(new T.CylinderGeometry(0.2, 0.24, 0.72, HQ ? 32 : 16), purple, 0, 1.1, 0, av);
-  if (HQ) add(new T.SphereGeometry(0.2, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), purple, 0, 1.46, 0, av);
-  add(new T.SphereGeometry(0.15, HQ ? 32 : 16, HQ ? 24 : 12), purple, 0, 1.64, 0, av);
-  box(0.2, 0.06, 0.06, HQ ? P(0x0d0d10, { roughness: 0.05, clearcoat: 1, metalness: 0.3 }) : M(0xf1eee6, { emissive: 0x444444 }), 0, 1.65, 0.12, av, 0.02);
-  const armL = limb(0.055, 0.55, purple, -0.28, 1.4), armR = limb(0.055, 0.55, purple, 0.28, 1.4);
   const handMat = HQ ? P(0x1f6bff, { roughness: 0.35, clearcoat: 0.5, clearcoatRoughness: 0.2 }) : M(0x2d8cff);   // blue nitrile gloves
-  add(new T.SphereGeometry(0.065, 16, 12), handMat, 0, -0.58, 0, armL); add(new T.SphereGeometry(0.065, 16, 12), handMat, 0, -0.58, 0, armR);
+  const av = new T.Group(); scene.add(av);
+  const capsule = (r, len) => {                       // a pill shape standing on y, centred at 0
+    const pts = [], h = len / 2 - r, n = HQ ? 10 : 6;
+    for (let i = 0; i <= n; i++) { const a = -Math.PI / 2 + i / n * Math.PI / 2; pts.push(new T.Vector2(Math.max(1e-4, Math.cos(a) * r), -h + Math.sin(a) * r)); }
+    for (let i = 0; i <= n; i++) { const a = i / n * Math.PI / 2; pts.push(new T.Vector2(Math.max(1e-4, Math.cos(a) * r), h + Math.sin(a) * r)); }
+    return new T.LatheGeometry(pts, HQ ? 32 : 14);
+  };
+  // Torso: the pictogram's shape (rounded shoulders, nearly square hips), extruded with soft edges.
+  const TW = 0.43, TOP = 1.39, HIPY = 0.72, BEV = 0.04;
+  const torsoShape = (() => {
+    const w = TW / 2 - BEV, h = (TOP - HIPY) / 2 - BEV, rt = 0.11, rb = 0.02, s = new T.Shape();
+    s.moveTo(-w + rb, -h); s.lineTo(w - rb, -h); s.quadraticCurveTo(w, -h, w, -h + rb);
+    s.lineTo(w, h - rt); s.quadraticCurveTo(w, h, w - rt, h); s.lineTo(-w + rt, h);
+    s.quadraticCurveTo(-w, h, -w, h - rt); s.lineTo(-w, -h + rb); s.quadraticCurveTo(-w, -h, -w + rb, -h);
+    return s;
+  })();
+  const torsoGeo = new T.ExtrudeGeometry(torsoShape, { depth: 0.24 - 2 * BEV, bevelEnabled: true, bevelThickness: BEV, bevelSize: BEV, bevelSegments: HQ ? 5 : 2, curveSegments: HQ ? 12 : 5 });
+  torsoGeo.center();
+  add(torsoGeo, purple, 0, (TOP + HIPY) / 2, 0, av);
+  add(new T.SphereGeometry(0.165, HQ ? 40 : 18, HQ ? 28 : 12), purple, 0, 1.585, 0, av);   // head, with a gap above the shoulders
+  // Limbs hang from pivots (shoulders, hips) so the walk, scrub and sweep animations can swing them.
+  const limb = (x, y, r, len, mat) => { const g = new T.Group(); g.position.set(x, y, 0); av.add(g); add(capsule(r, len), mat, 0, -len / 2 + r, 0, g); return g; };
+  const armL = limb(-0.30, 1.33, 0.072, 0.78, purple), armR = limb(0.30, 1.33, 0.072, 0.78, purple);
+  for (const arm of [armL, armR]) add(capsule(0.077, 0.18), handMat, 0, -0.62, 0, arm);   // glove over the hand
+  const legL = limb(-0.112, HIPY + 0.09, 0.09, HIPY + 0.18, deep), legR = limb(0.112, HIPY + 0.09, 0.09, HIPY + 0.18, deep);   // feet on the floor
   // Broom / mop held in front while sweeping and mopping.
   const tool = new T.Group(); tool.position.set(0.05, 0.75, 0.45); tool.rotation.x = 0.55; av.add(tool);
   add(new T.CylinderGeometry(0.02, 0.02, 1.4, 12), M(0xc9a36b, { roughness: 0.5 }), 0, 0, 0, tool);
@@ -1945,98 +1960,10 @@ function v3Init() {
   scene.add(trail);
 
   canvas.addEventListener("webglcontextlost", e => { e.preventDefault(); V3.ready = false; useFlat(); });
-  loadAvatarModel().then(d => swapAvatar(d, purple, deep, HQ)).catch(e => console.warn("3D View: avatar model not loaded, keeping the simple one", e));
   Object.assign(V3, { T, renderer, scene, camera, av, legL, legR, armL, armR, handMat, skin, glove, tool, toolHead, cart, sign, trail, trailPos, trailGeo, zoneMats,
     labels: [...document.querySelectorAll("#v3Labels .v3-label")], vec: new T.Vector3(), ready: true, dirty: true });
   v3Resize();
   bindCanvas(canvas);
-}
-
-// ---- the cleaner's character model (models/avatar.glb) ----
-// One static mesh in a T-pose, stored upside down. It's read straight from the .glb, turned upright
-// to face +z, scaled to 1.75 m, then cut into body, arms, hands and legs so the walk, scrub and sweep
-// animations can move the limbs. Colours match the old avatar.
-async function loadAvatarModel() {
-  const buf = await (await fetch("models/avatar.glb")).arrayBuffer();
-  const dv = new DataView(buf), jsonLen = dv.getUint32(12, true);
-  const json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jsonLen)));
-  const bin = 20 + jsonLen + 8, prim = json.meshes[0].primitives[0];
-  const read = ai => {
-    const a = json.accessors[ai], v = json.bufferViews[a.bufferView];
-    const C = { 5126: Float32Array, 5125: Uint32Array, 5123: Uint16Array, 5121: Uint8Array }[a.componentType];
-    const n = a.count * ({ SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }[a.type]);
-    return new C(buf.slice(bin + (v.byteOffset || 0) + (a.byteOffset || 0), bin + (v.byteOffset || 0) + (a.byteOffset || 0) + n * C.BYTES_PER_ELEMENT));
-  };
-  return { pos: read(prim.attributes.POSITION), nrm: read(prim.attributes.NORMAL), idx: read(prim.indices) };
-}
-function swapAvatar(d, purple, deep, HQ) {
-  const T = V3.T, av = V3.av, S = 1.75 / 2.75, Y0 = 1.7066;
-  // Raw model: head at -y, feet at +y, face toward -z. Upright: y' = (Y0 - y) * S, z' = -z * S.
-  // One continuous skinned mesh: each vertex blends smoothly between the body and an arm or leg
-  // bone near the joint, so shoulders and hips bend cleanly instead of tearing.
-  const SH = [0.47, 0.05], HIP = [0.2, 1.0];          // shoulder (|x|, y) and hip (|x|, y), raw units
-  const CAP_Y = -0.62;                                 // everything above this on the head is the ball cap
-  const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-  const n = d.pos.length / 3;
-  const pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3);
-  const skinIndex = new Uint16Array(n * 4), skinWeight = new Float32Array(n * 4);
-  // Bones: 0 body, 1 left arm, 2 right arm, 3 left leg, 4 right leg.
-  for (let v = 0; v < n; v++) {
-    const rx = d.pos[v * 3], ry = d.pos[v * 3 + 1], rz = d.pos[v * 3 + 2];
-    pos[v * 3] = rx * S; pos[v * 3 + 1] = (Y0 - ry) * S; pos[v * 3 + 2] = -rz * S;
-    nrm[v * 3] = d.nrm[v * 3]; nrm[v * 3 + 1] = -d.nrm[v * 3 + 1]; nrm[v * 3 + 2] = -d.nrm[v * 3 + 2];
-    const band = ss(-0.4, -0.2, ry) * (1 - ss(0.3, 0.5, ry));        // shoulder height only
-    const arm = ss(0.42, 0.7, Math.abs(rx)) * band;
-    const leg = ss(0.85, 1.15, ry) * (1 - arm);
-    const legL = leg * (1 - ss(-0.06, 0.06, rx)), legR = leg - legL;
-    const w = [1 - arm - leg, rx < 0 ? arm : 0, rx < 0 ? 0 : arm, legL, legR];
-    // Keep the 4 strongest influences.
-    const order = [0, 1, 2, 3, 4].sort((i, j) => w[j] - w[i]).slice(0, 4);
-    let sum = 0; order.forEach(i => sum += w[i]);
-    order.forEach((i, k) => { skinIndex[v * 4 + k] = i; skinWeight[v * 4 + k] = w[i] / (sum || 1); });
-  }
-  // Colours by face: hands skin/glove, legs deep purple, the rest SiteVue purple.
-  const groups = [[], [], []];                                          // purple, deep, hands
-  for (let i = 0; i < d.idx.length; i += 3) {
-    let cx = 0, cy = 0;
-    for (let k = 0; k < 3; k++) { cx += d.pos[d.idx[i + k] * 3]; cy += d.pos[d.idx[i + k] * 3 + 1]; }
-    cx /= 3; cy /= 3;
-    if (cy < CAP_Y && Math.abs(cx) < 0.6) continue;                   // the ball cap: dropped (new head top below)
-    const g = Math.abs(cx) > 1.18 && cy > -0.3 && cy < 0.4 ? 2 : cy > HIP[1] ? 1 : 0;   // gloves: hand and wrist
-    groups[g].push(d.idx[i], d.idx[i + 1], d.idx[i + 2]);
-  }
-  const geo = new T.BufferGeometry();
-  geo.setAttribute("position", new T.BufferAttribute(pos, 3));
-  geo.setAttribute("normal", new T.BufferAttribute(nrm, 3));
-  geo.setAttribute("skinIndex", new T.Uint16BufferAttribute(skinIndex, 4));
-  geo.setAttribute("skinWeight", new T.Float32BufferAttribute(skinWeight, 4));
-  const index = [...groups[0], ...groups[1], ...groups[2]];
-  geo.setIndex(index);
-  geo.addGroup(0, groups[0].length, 0); geo.addGroup(groups[0].length, groups[1].length, 1); geo.addGroup(groups[0].length + groups[1].length, groups[2].length, 2);
-  const mats = [purple, deep, V3.handMat];
-  mats.forEach(m => { m.skinning = true; m.needsUpdate = true; });
-  // Remove the old figure (keep the floor ring, pointer and broom).
-  for (const c of [...av.children]) if (c.isGroup && c !== V3.tool || (c.isMesh && !c.material.isMeshBasicMaterial)) av.remove(c);
-  const root = new T.Bone();
-  const bone = (x, y) => { const b = new T.Bone(); b.position.set(x, y, 0); root.add(b); return b; };
-  const armL = bone(-SH[0] * S, (Y0 - SH[1]) * S), armR = bone(SH[0] * S, (Y0 - SH[1]) * S);
-  const legL = bone(-HIP[0] * S, (Y0 - HIP[1]) * S), legR = bone(HIP[0] * S, (Y0 - HIP[1]) * S);
-  const mesh = new T.SkinnedMesh(geo, mats);
-  mesh.add(root); av.add(mesh);
-  mesh.updateMatrixWorld(true);
-  mesh.bind(new T.Skeleton([root, armL, armR, legL, legR]));
-  mesh.frustumCulled = false;
-  if (HQ) mesh.castShadow = mesh.receiveShadow = true;
-  // A smooth rounded head top where the cap was, sized to the head at the cut (x ±0.33, z -0.39..0.26).
-  const headMat = purple.clone(); headMat.skinning = false;
-  const dome = new T.Mesh(new T.SphereGeometry(1, 40, 20, 0, Math.PI * 2, 0, Math.PI * 0.6), headMat);
-  dome.scale.set(0.335 * S, 0.38 * S, 0.33 * S);
-  dome.position.set(0, (Y0 - (CAP_Y + 0.04)) * S, 0.065 * S);
-  if (HQ) dome.castShadow = dome.receiveShadow = true;
-  av.add(dome);
-  // Arms hang at the sides (rotation.z); the animations swing them on rotation.x.
-  armL.rotation.z = 1.25; armR.rotation.z = -1.25;
-  Object.assign(V3, { armL, armR, legL, legR, avatarMesh: mesh, dirty: true });
 }
 
 function v3Resize() {
